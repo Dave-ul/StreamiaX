@@ -19,7 +19,7 @@ import java.io.Closeable
  * Reuses [app.cash.quickjs.QuickJs], the engine Aniyomi already bundles, which binds native
  * implementations through plain interfaces ([set]) rather than per-call argument arrays.
  *
- * The full lnreader plugin host (cheerio shim, `@libs/*` modules, async fetch, and ES-module
+ * The full lnreader plugin host (cheerio shim, `@libs` modules, async fetch, and ES-module
  * plugin loading) is layered on top of this in later steps.
  *
  * Not thread-safe: a QuickJS instance must be used from a single thread. Create one runtime
