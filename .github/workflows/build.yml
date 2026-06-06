@@ -3,6 +3,7 @@ name: Build APK
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
     branches: [main]
 
@@ -14,6 +15,8 @@ jobs:
   build:
     name: Build debug APK
     runs-on: ubuntu-latest
+    # Skip debug build on tag pushes - we only need the signed release
+    if: github.event_name != 'push' || !startsWith(github.ref, 'refs/tags/')
 
     steps:
       - name: Checkout
@@ -46,8 +49,10 @@ jobs:
   release:
     name: Build signed release APK
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: build
+    if: >
+      (github.ref == 'refs/heads/main' && github.event_name == 'push') ||
+      startsWith(github.ref, 'refs/tags/v')
+    needs: []
 
     steps:
       - name: Checkout
@@ -89,3 +94,21 @@ jobs:
       - name: Clean up keystore
         if: always()
         run: rm -f ${{ runner.temp }}/release.jks
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: StreamiaX ${{ github.ref_name }}
+          body: |
+            ## StreamiaX ${{ github.ref_name }}
+
+            ### Download
+            Install `StreamiaX-${{ github.ref_name }}.apk` on any Android 8.0+ device.
+            The APK is signed with the release keystore and ready to install.
+
+            ### What's changed
+            See the [commit history](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for details.
+          files: app/build/outputs/apk/release/app-release.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: true
