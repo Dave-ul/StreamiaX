@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material.icons.automirrored.outlined.Label
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.GetApp
 import androidx.compose.material.icons.outlined.Info
@@ -38,6 +39,7 @@ fun MoreScreen(
     incognitoMode: Boolean,
     onIncognitoModeChange: (Boolean) -> Unit,
     navStyle: NavStyle,
+    onClickNovels: () -> Unit,
     onClickAlt: () -> Unit,
     onClickDownloadQueue: () -> Unit,
     onClickCategories: () -> Unit,
@@ -77,6 +79,15 @@ fun MoreScreen(
             }
 
             item { HorizontalDivider() }
+
+            item {
+                TextPreferenceWidget(
+                    title = "Novels",
+                    subtitle = "Read light novels (Project Gutenberg)",
+                    icon = Icons.AutoMirrored.Outlined.MenuBook,
+                    onPreferenceClick = onClickNovels,
+                )
+            }
 
             item {
                 TextPreferenceWidget(
