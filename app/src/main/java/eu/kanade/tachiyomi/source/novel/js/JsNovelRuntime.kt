@@ -58,7 +58,7 @@ class JsNovelRuntime : Closeable {
             "__console",
             ConsoleBridge::class.java,
             object : ConsoleBridge {
-                override fun log(message: String) = logcat(tag = "JsNovel") { message }
+                override fun log(message: String) = this@JsNovelRuntime.logcat { "[JsNovel] $message" }
             },
         )
         quickJs.evaluate(BOOTSTRAP, "<bootstrap>")
