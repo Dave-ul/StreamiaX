@@ -61,6 +61,7 @@ class AndroidAnimeSourceManager(
                                 Injekt.get(),
                                 Injekt.get(),
                             ),
+                            StremioAnimeSource.ID to StremioAnimeSource(),
                         ),
                     )
                     extensions.forEach { extension ->
