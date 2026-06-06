@@ -1,19 +1,57 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("mihon.library")
+    kotlin("android")
+    kotlin("plugin.serialization")
 }
 
 android {
-    namespace = "com.streamiax.common"
-    compileSdk = 35
-    defaultConfig { minSdk = 26 }
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_17
-        targetCompatibility = JavaVersion.VERSION_17
+    namespace = "eu.kanade.tachiyomi.core.common"
+}
+
+kotlin {
+    compilerOptions {
+        freeCompilerArgs.addAll(
+            "-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi",
+            "-opt-in=kotlinx.serialization.ExperimentalSerializationApi",
+        )
     }
-    kotlinOptions { jvmTarget = "17" }
 }
 
 dependencies {
-    implementation(libs.coroutines.android)
+    implementation(projects.i18n)
+
+    api(libs.logcat)
+
+    api(libs.rxjava)
+
+    api(libs.okhttp.core)
+    api(libs.okhttp.logging)
+    api(libs.okhttp.brotli)
+    api(libs.okhttp.dnsoverhttps)
+    api(libs.okio)
+
+    implementation(libs.image.decoder)
+
+    implementation(libs.unifile)
+    implementation(libs.libarchive)
+
+    api(kotlinx.coroutines.core)
+    api(kotlinx.serialization.json)
+    api(kotlinx.serialization.json.okio)
+
+    api(libs.preferencektx)
+
+    implementation(libs.jsoup)
+
+    // Sort
+    implementation(libs.natural.comparator)
+
+    // JavaScript engine
+    implementation(libs.bundles.js.engine)
+
+    // FFmpeg-kit
+    implementation(aniyomilibs.ffmpeg.kit)
+
+    // Tests
+    testImplementation(libs.bundles.test)
 }

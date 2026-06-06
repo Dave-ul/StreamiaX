@@ -1,0 +1,111 @@
+name: CI
+
+permissions:
+  contents: write
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build app
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Set up gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build APK
+        run: ./gradlew assembleRelease
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-v8a-${{ github.sha }}
+          path: app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+
+      - name: Upload universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-${{ github.sha }}
+          path: app/build/outputs/apk/release/app-universal-release-unsigned.apk
+
+      # Sign APKs and create release on tags
+
+      - name: Get tag name
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: echo "VERSION_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
+
+      - name: Sign APKs
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: r0adkll/sign-android-release@f30bdd30588842ac76044ecdbd4b6d0e3e813478
+        with:
+          releaseDirectory: app/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+        env:
+          BUILD_TOOLS_VERSION: '35.0.1'
+
+      - name: Rename signed APKs
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          set -e
+          cd app/build/outputs/apk/release
+          for abi in universal arm64-v8a armeabi-v7a x86 x86_64; do
+            src="app-${abi}-release-unsigned-signed.apk"
+            if [ -f "$src" ]; then
+              mv "$src" "$GITHUB_WORKSPACE/streamiax-${abi}-${VERSION_TAG}.apk"
+            fi
+          done
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION_TAG }}
+          name: StreamiaX ${{ env.VERSION_TAG }}
+          body: |
+            ## StreamiaX ${{ env.VERSION_TAG }}
+
+            Based on [Aniyomi](https://github.com/aniyomiorg/aniyomi) with integrated
+            Stremio streaming add-ons and lnreader-style novel sources.
+
+            ### Download
+            Use **streamiax-universal-${{ env.VERSION_TAG }}.apk** if unsure which to pick.
+            For smaller downloads choose your device ABI (most modern phones: arm64-v8a).
+
+            Requires Android 8.0+.
+          files: |
+            streamiax-universal-${{ env.VERSION_TAG }}.apk
+            streamiax-arm64-v8a-${{ env.VERSION_TAG }}.apk
+            streamiax-armeabi-v7a-${{ env.VERSION_TAG }}.apk
+            streamiax-x86-${{ env.VERSION_TAG }}.apk
+            streamiax-x86_64-${{ env.VERSION_TAG }}.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

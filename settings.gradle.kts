@@ -1,37 +1,60 @@
 pluginManagement {
+    resolutionStrategy {
+        eachPlugin {
+            val regex = "com.android.(library|application)".toRegex()
+            if (regex matches requested.id.id) {
+                useModule("com.android.tools.build:gradle:${requested.version}")
+            }
+        }
+    }
     repositories {
+        gradlePluginPortal()
         google()
         mavenCentral()
-        gradlePluginPortal()
+        maven(url = "https://www.jitpack.io")
     }
 }
 
 dependencyResolutionManagement {
+    versionCatalogs {
+        create("kotlinx") {
+            from(files("gradle/kotlinx.versions.toml"))
+        }
+        create("androidx") {
+            from(files("gradle/androidx.versions.toml"))
+        }
+        create("compose") {
+            from(files("gradle/compose.versions.toml"))
+        }
+        create("aniyomilibs") {
+            from(files("gradle/aniyomi.versions.toml"))
+        }
+    }
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
         mavenCentral()
-        maven("https://jitpack.io")
+        google()
+        maven(url = "https://www.jitpack.io")
     }
 }
 
+plugins {
+    id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
+}
+
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
 rootProject.name = "StreamiaX"
-
 include(":app")
-
-// Core modules
-include(":core:domain")
-include(":core:network")
-include(":core:database")
+include(":core-metadata")
+include(":core:archive")
 include(":core:common")
-
-// Integration modules
-include(":core:streaming")   // Stremio add-on protocol
-include(":core:anime")       // Aniyomi source system
-include(":core:novel")       // LNReader plugin system
-
-// Feature modules
-include(":feature:catalog")
-include(":feature:player")
-include(":feature:reader")
-include(":feature:library")
+include(":data")
+include(":domain")
+include(":i18n")
+include(":i18n-aniyomi")
+include(":macrobenchmark")
+include(":presentation-core")
+include(":presentation-widget")
+include(":source-api")
+include(":source-local")
