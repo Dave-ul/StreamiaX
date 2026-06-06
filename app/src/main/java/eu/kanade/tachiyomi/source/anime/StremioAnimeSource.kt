@@ -149,6 +149,7 @@ class StremioAnimeSource : AnimeHttpSource() {
     override fun seasonListParse(response: Response): List<SAnime> = unsupported()
     override fun hosterListParse(response: Response): List<Hoster> = unsupported()
     override fun videoListParse(response: Response): List<Video> = unsupported()
+    override fun videoListParse(response: Response, hoster: Hoster): List<Video> = unsupported()
     override fun videoUrlParse(response: Response): String = unsupported()
 
     private fun <T> unsupported(): T =
