@@ -44,7 +44,7 @@ jobs:
           retention-days: 14
 
   release:
-    name: Build release APK
+    name: Build signed release APK
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     needs: build
@@ -64,15 +64,28 @@ jobs:
         with:
           cache-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 --decode > ${{ runner.temp }}/release.jks
+
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build release APK (unsigned)
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/release.jks
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease --stacktrace
 
-      - name: Upload release APK
+      - name: Upload signed release APK
         uses: actions/upload-artifact@v4
         with:
-          name: streamiax-release-unsigned-${{ github.sha }}
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: streamiax-release-${{ github.sha }}
+          path: app/build/outputs/apk/release/app-release.apk
           retention-days: 30
+
+      - name: Clean up keystore
+        if: always()
+        run: rm -f ${{ runner.temp }}/release.jks
