@@ -181,6 +181,9 @@ kotlin {
 }
 
 dependencies {
+    // StreamiaX: QuickJS engine for the lnreader-style JS novel plugin runtime
+    implementation("io.github.taoweiji.quickjs:quickjs-android:1.4.6")
+
     implementation(projects.i18n)
     implementation(projects.i18nAniyomi)
     implementation(projects.core.archive)
