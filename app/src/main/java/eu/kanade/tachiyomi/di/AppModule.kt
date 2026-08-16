@@ -10,6 +10,8 @@ import data.History
 import data.Mangas
 import dataanime.Animehistory
 import dataanime.Animes
+import datanovel.Novelhistory
+import datanovel.Novels
 import eu.kanade.domain.track.anime.store.DelayedAnimeTrackingStore
 import eu.kanade.domain.track.manga.store.DelayedMangaTrackingStore
 import eu.kanade.tachiyomi.BuildConfig
@@ -31,6 +33,7 @@ import eu.kanade.tachiyomi.network.JavaScriptEngine
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.source.anime.AndroidAnimeSourceManager
 import eu.kanade.tachiyomi.source.manga.AndroidMangaSourceManager
+import eu.kanade.tachiyomi.source.novel.NovelSourceManager
 import eu.kanade.tachiyomi.ui.player.ExternalIntents
 import io.requery.android.database.sqlite.RequerySQLiteOpenHelperFactory
 import kotlinx.serialization.json.Json
@@ -49,10 +52,12 @@ import tachiyomi.data.handlers.anime.AndroidAnimeDatabaseHandler
 import tachiyomi.data.handlers.anime.AnimeDatabaseHandler
 import tachiyomi.data.handlers.manga.AndroidMangaDatabaseHandler
 import tachiyomi.data.handlers.manga.MangaDatabaseHandler
+import tachiyomi.data.handlers.novel.NovelDatabaseHandler
 import tachiyomi.domain.source.anime.service.AnimeSourceManager
 import tachiyomi.domain.source.manga.service.MangaSourceManager
 import tachiyomi.domain.storage.service.StorageManager
 import tachiyomi.mi.data.AnimeDatabase
+import tachiyomi.novel.data.NovelDatabase
 import tachiyomi.source.local.entries.anime.LocalAnimeFetchTypeManager
 import tachiyomi.source.local.image.anime.LocalAnimeBackgroundManager
 import tachiyomi.source.local.image.anime.LocalAnimeCoverManager
@@ -121,6 +126,31 @@ class AppModule(val app: Application) : InjektModule {
             },
         )
 
+        val sqlDriverNovel = AndroidSqliteDriver(
+            schema = NovelDatabase.Schema,
+            context = app,
+            name = "tachiyomi.noveldb",
+            factory = if (BuildConfig.DEBUG && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Support database inspector in Android Studio
+                FrameworkSQLiteOpenHelperFactory()
+            } else {
+                RequerySQLiteOpenHelperFactory()
+            },
+            callback = object : AndroidSqliteDriver.Callback(NovelDatabase.Schema) {
+                override fun onOpen(db: SupportSQLiteDatabase) {
+                    super.onOpen(db)
+                    setPragma(db, "foreign_keys = ON")
+                    setPragma(db, "journal_mode = WAL")
+                    setPragma(db, "synchronous = NORMAL")
+                }
+                private fun setPragma(db: SupportSQLiteDatabase, pragma: String) {
+                    val cursor = db.query("PRAGMA $pragma")
+                    cursor.moveToFirst()
+                    cursor.close()
+                }
+            },
+        )
+
         addSingletonFactory {
             Database(
                 driver = sqlDriverManga,
@@ -147,6 +177,21 @@ class AppModule(val app: Application) : InjektModule {
                 ),
             )
         }
+
+        addSingletonFactory {
+            NovelDatabase(
+                driver = sqlDriverNovel,
+                novelhistoryAdapter = Novelhistory.Adapter(
+                    last_readAdapter = DateColumnAdapter,
+                ),
+                novelsAdapter = Novels.Adapter(
+                    genreAdapter = StringListColumnAdapter,
+                    update_strategyAdapter = MangaUpdateStrategyColumnAdapter,
+                ),
+            )
+        }
+
+        addSingletonFactory { NovelDatabaseHandler(get()) }
 
         addSingletonFactory<MangaDatabaseHandler> {
             AndroidMangaDatabaseHandler(
@@ -194,6 +239,7 @@ class AppModule(val app: Application) : InjektModule {
 
         addSingletonFactory<MangaSourceManager> { AndroidMangaSourceManager(app, get(), get()) }
         addSingletonFactory<AnimeSourceManager> { AndroidAnimeSourceManager(app, get(), get()) }
+        addSingletonFactory { NovelSourceManager(get()) }
 
         addSingletonFactory { MangaExtensionManager(app) }
         addSingletonFactory { AnimeExtensionManager(app) }

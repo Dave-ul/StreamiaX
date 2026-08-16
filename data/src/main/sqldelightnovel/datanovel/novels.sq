@@ -1,0 +1,115 @@
+import eu.kanade.tachiyomi.source.model.UpdateStrategy;
+import kotlin.Boolean;
+import kotlin.String;
+import kotlin.collections.List;
+
+CREATE TABLE novels(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    source INTEGER NOT NULL,
+    url TEXT NOT NULL,
+    author TEXT,
+    description TEXT,
+    genre TEXT AS List<String>,
+    title TEXT NOT NULL,
+    status INTEGER NOT NULL,
+    thumbnail_url TEXT,
+    favorite INTEGER AS Boolean NOT NULL,
+    last_update INTEGER,
+    next_update INTEGER,
+    initialized INTEGER AS Boolean NOT NULL,
+    reader_flags INTEGER NOT NULL,
+    chapter_flags INTEGER NOT NULL,
+    cover_last_modified INTEGER NOT NULL,
+    date_added INTEGER NOT NULL,
+    update_strategy INTEGER AS UpdateStrategy NOT NULL DEFAULT 0,
+    calculate_interval INTEGER DEFAULT 0 NOT NULL
+);
+
+CREATE INDEX novellibrary_favorite_index ON novels(favorite) WHERE favorite = 1;
+CREATE INDEX novels_url_index ON novels(url);
+
+getNovelById:
+SELECT *
+FROM novels
+WHERE _id = :id;
+
+getNovelByUrlAndSource:
+SELECT *
+FROM novels
+WHERE url = :url
+AND source = :source
+LIMIT 1;
+
+getFavorites:
+SELECT *
+FROM novels
+WHERE favorite = 1;
+
+getAllNovels:
+SELECT *
+FROM novels;
+
+getSourceIdWithFavoriteCount:
+SELECT
+source,
+count(*)
+FROM novels
+WHERE favorite = 1
+GROUP BY source;
+
+getFavoriteBySourceId:
+SELECT *
+FROM novels
+WHERE favorite = 1
+AND source = :sourceId;
+
+getDuplicateLibraryNovel:
+SELECT *
+FROM novels
+WHERE favorite = 1
+AND LOWER(title) = :title
+AND _id != :id;
+
+getSourceIdsWithNonLibraryNovel:
+SELECT source, COUNT(*) AS novel_count
+FROM novels
+WHERE favorite = 0
+GROUP BY source;
+
+deleteNovelsNotInLibraryBySourceIds:
+DELETE FROM novels
+WHERE favorite = 0
+AND source IN :sourceIds;
+
+resetReaderFlags:
+UPDATE novels
+SET reader_flags = 0;
+
+insert:
+INSERT INTO novels(source, url, author, description, genre, title, status, thumbnail_url, favorite, last_update, next_update, initialized, reader_flags, chapter_flags, cover_last_modified, date_added, update_strategy, calculate_interval)
+VALUES (:source, :url, :author, :description, :genre, :title, :status, :thumbnailUrl, :favorite, :lastUpdate, :nextUpdate, :initialized, :readerFlags, :chapterFlags, :coverLastModified, :dateAdded, :updateStrategy, :calculateInterval);
+
+update:
+UPDATE novels SET
+    source = coalesce(:source, source),
+    url = coalesce(:url, url),
+    author = coalesce(:author, author),
+    description = coalesce(:description, description),
+    genre = coalesce(:genre, genre),
+    title = coalesce(:title, title),
+    status = coalesce(:status, status),
+    thumbnail_url = coalesce(:thumbnailUrl, thumbnail_url),
+    favorite = coalesce(:favorite, favorite),
+    last_update = coalesce(:lastUpdate, last_update),
+    next_update = coalesce(:nextUpdate, next_update),
+    initialized = coalesce(:initialized, initialized),
+    reader_flags = coalesce(:readerFlags, reader_flags),
+    chapter_flags = coalesce(:chapterFlags, chapter_flags),
+    cover_last_modified = coalesce(:coverLastModified, cover_last_modified),
+    date_added = coalesce(:dateAdded, date_added),
+    update_strategy = coalesce(:updateStrategy, update_strategy),
+    calculate_interval = coalesce(:calculateInterval, calculate_interval)
+WHERE _id = :novelId;
+
+selectLastInsertedRowId:
+SELECT last_insert_rowid();

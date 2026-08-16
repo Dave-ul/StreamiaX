@@ -73,9 +73,11 @@ import tachiyomi.data.category.manga.MangaCategoryRepositoryImpl
 import tachiyomi.data.custombutton.CustomButtonRepositoryImpl
 import tachiyomi.data.entries.anime.AnimeRepositoryImpl
 import tachiyomi.data.entries.manga.MangaRepositoryImpl
+import tachiyomi.data.entries.novel.NovelRepositoryImpl
 import tachiyomi.data.history.anime.AnimeHistoryRepositoryImpl
 import tachiyomi.data.history.manga.MangaHistoryRepositoryImpl
 import tachiyomi.data.items.chapter.ChapterRepositoryImpl
+import tachiyomi.data.items.novelchapter.NovelChapterRepositoryImpl
 import tachiyomi.data.items.episode.EpisodeRepositoryImpl
 import tachiyomi.data.release.ReleaseServiceImpl
 import tachiyomi.data.source.anime.AnimeSourceRepositoryImpl
@@ -142,6 +144,8 @@ import tachiyomi.domain.entries.manga.interactor.NetworkToLocalManga
 import tachiyomi.domain.entries.manga.interactor.ResetMangaViewerFlags
 import tachiyomi.domain.entries.manga.interactor.SetMangaChapterFlags
 import tachiyomi.domain.entries.manga.repository.MangaRepository
+import tachiyomi.domain.entries.novel.repository.NovelRepository
+import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
 import tachiyomi.domain.history.anime.interactor.GetAnimeHistory
 import tachiyomi.domain.history.anime.interactor.GetNextEpisodes
 import tachiyomi.domain.history.anime.interactor.RemoveAnimeHistory
@@ -251,6 +255,9 @@ class DomainModule : InjektModule {
         addFactory { SetAnimeCategories(get()) }
         addFactory { ShouldUpdateDbSeason() }
         addFactory { SyncSeasonsWithSource(get(), get(), get(), get(), get()) }
+
+        addSingletonFactory<NovelRepository> { NovelRepositoryImpl(get()) }
+        addSingletonFactory<NovelChapterRepository> { NovelChapterRepositoryImpl(get()) }
 
         addSingletonFactory<MangaRepository> { MangaRepositoryImpl(get()) }
         addFactory { GetDuplicateLibraryManga(get()) }
