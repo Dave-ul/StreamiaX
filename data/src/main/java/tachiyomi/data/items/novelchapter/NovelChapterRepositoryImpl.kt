@@ -7,6 +7,7 @@ import tachiyomi.data.handlers.novel.NovelDatabaseHandler
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
 import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
+import java.util.Date
 
 class NovelChapterRepositoryImpl(
     private val handler: NovelDatabaseHandler,
@@ -95,6 +96,14 @@ class NovelChapterRepositoryImpl(
     override suspend fun getChapterByUrlAndNovelId(url: String, novelId: Long): NovelChapter? {
         return handler.awaitOneOrNull {
             novel_chaptersQueries.getChapterByUrlAndNovelId(url, novelId, ::mapChapter)
+        }
+    }
+
+    override suspend fun upsertHistory(chapterId: Long, readAt: Date, sessionReadDuration: Long) {
+        try {
+            handler.await { novelhistoryQueries.upsert(chapterId, readAt, sessionReadDuration) }
+        } catch (e: Exception) {
+            logcat(LogPriority.ERROR, e)
         }
     }
 

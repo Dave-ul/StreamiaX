@@ -25,7 +25,7 @@ import eu.kanade.tachiyomi.data.download.anime.AnimeDownloadManager
 import eu.kanade.tachiyomi.data.download.manga.MangaDownloadManager
 import eu.kanade.tachiyomi.ui.category.CategoriesTab
 import eu.kanade.tachiyomi.ui.download.DownloadsTab
-import eu.kanade.tachiyomi.ui.novel.NovelCatalogScreen
+import eu.kanade.tachiyomi.ui.library.novel.NovelLibraryScreen
 import eu.kanade.tachiyomi.ui.setting.PlayerSettingsScreen
 import eu.kanade.tachiyomi.ui.setting.SettingsScreen
 import eu.kanade.tachiyomi.ui.stats.StatsTab
@@ -73,7 +73,7 @@ data object MoreTab : Tab {
             incognitoMode = screenModel.incognitoMode,
             onIncognitoModeChange = { screenModel.incognitoMode = it },
             navStyle = navStyle,
-            onClickNovels = { navigator.push(NovelCatalogScreen()) },
+            onClickNovels = { navigator.push(NovelLibraryScreen()) },
             onClickAlt = { navigator.push(navStyle.moreTab) },
             onClickDownloadQueue = { navigator.push(DownloadsTab) },
             onClickCategories = { navigator.push(CategoriesTab) },

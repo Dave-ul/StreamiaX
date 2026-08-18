@@ -83,7 +83,7 @@ fun MoreScreen(
             item {
                 TextPreferenceWidget(
                     title = "Novels",
-                    subtitle = "Read light novels (Project Gutenberg)",
+                    subtitle = "Your light novel library",
                     icon = Icons.AutoMirrored.Outlined.MenuBook,
                     onPreferenceClick = onClickNovels,
                 )

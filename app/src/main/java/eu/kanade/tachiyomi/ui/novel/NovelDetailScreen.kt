@@ -8,6 +8,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Favorite
+import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -24,18 +27,28 @@ import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.components.AppBar
+import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.source.novel.GutenbergNovelSource
+import eu.kanade.tachiyomi.novelsource.NovelSource
 import eu.kanade.tachiyomi.novelsource.model.SNovel
+import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
+import eu.kanade.tachiyomi.source.novel.NovelSourceManager
+import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import tachiyomi.domain.entries.novel.model.Novel
+import tachiyomi.domain.entries.novel.model.NovelUpdate
+import tachiyomi.domain.entries.novel.repository.NovelRepository
+import tachiyomi.domain.items.novelchapter.model.NovelChapter
+import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
 import tachiyomi.presentation.core.components.material.Scaffold
-
-data class ChapterUi(val url: String, val name: String)
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 class NovelDetailScreen(
+    private val sourceId: Long,
     private val novelUrl: String,
     private val novelTitle: String,
 ) : Screen() {
@@ -43,7 +56,7 @@ class NovelDetailScreen(
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { NovelDetailScreenModel(novelUrl) }
+        val screenModel = rememberScreenModel { NovelDetailScreenModel(sourceId, novelUrl, novelTitle) }
         val state by screenModel.state.collectAsState()
 
         Scaffold(
@@ -51,6 +64,21 @@ class NovelDetailScreen(
                 AppBar(
                     title = novelTitle,
                     navigateUp = navigator::pop,
+                    actions = {
+                        AppBarActions(
+                            actions = persistentListOf(
+                                AppBar.Action(
+                                    title = if (state.favorite) "Remove from library" else "Add to library",
+                                    icon = if (state.favorite) {
+                                        Icons.Filled.Favorite
+                                    } else {
+                                        Icons.Outlined.FavoriteBorder
+                                    },
+                                    onClick = screenModel::toggleFavorite,
+                                ),
+                            ),
+                        )
+                    },
                 )
             },
         ) { contentPadding ->
@@ -82,16 +110,22 @@ class NovelDetailScreen(
                             HorizontalDivider()
                         }
                     }
-                    items(state.chapters, key = { it.url }) { chapter ->
+                    items(state.chapters, key = { it.id }) { chapter ->
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable {
-                                    navigator.push(NovelReaderScreen(chapter.url, chapter.name))
-                                }
+                                .clickable { navigator.push(NovelReaderScreen(chapter.id)) }
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                         ) {
-                            Text(chapter.name, style = MaterialTheme.typography.bodyLarge)
+                            Text(
+                                text = chapter.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (chapter.read) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                },
+                            )
                         }
                         HorizontalDivider()
                     }
@@ -101,42 +135,121 @@ class NovelDetailScreen(
     }
 }
 
-class NovelDetailScreenModel(private val novelUrl: String) : ScreenModel {
-
-    private val source = GutenbergNovelSource()
+class NovelDetailScreenModel(
+    private val sourceId: Long,
+    private val novelUrl: String,
+    private val novelTitle: String,
+    private val sourceManager: NovelSourceManager = Injekt.get(),
+    private val novelRepository: NovelRepository = Injekt.get(),
+    private val chapterRepository: NovelChapterRepository = Injekt.get(),
+) : ScreenModel {
 
     private val _state = MutableStateFlow(State())
     val state = _state.asStateFlow()
+
+    private var novelId: Long = -1
 
     init {
         load()
     }
 
+    /**
+     * Novels are persisted on first open with `favorite = false`, the way Mihon treats manga, so
+     * chapters always have a stable id for the reader to record progress against.
+     */
     private fun load() {
         screenModelScope.launch {
             runCatching {
-                val novel = SNovel.create().apply { url = novelUrl }
-                val details = source.getNovelDetails(novel)
-                val chapters = source.getChapterList(details)
-                details to chapters
-            }.onSuccess { (details, chapters) ->
-                _state.update {
-                    it.copy(
-                        loading = false,
+                val source = sourceManager.get(sourceId) ?: error("Source $sourceId not available")
+                val novel = getOrInsertNovel()
+                novelId = novel.id
+
+                val details = source.getNovelDetails(novel.toSNovel())
+                novelRepository.updateNovel(
+                    NovelUpdate(
+                        id = novelId,
+                        author = details.author,
                         description = details.description,
-                        chapters = chapters.map { c -> ChapterUi(c.url, c.name) },
-                    )
+                        genre = details.genre?.split(",")?.map(String::trim),
+                        status = details.status.toLong(),
+                        thumbnailUrl = details.thumbnail_url,
+                        initialized = true,
+                    ),
+                )
+
+                val chapters = syncChapters(source, details)
+                details.description to chapters
+            }.onSuccess { (description, chapters) ->
+                _state.update {
+                    it.copy(loading = false, description = description, chapters = chapters)
                 }
+                observeFavorite()
             }.onFailure { e ->
                 _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
             }
         }
     }
 
+    private suspend fun getOrInsertNovel(): Novel {
+        novelRepository.getNovelByUrlAndSourceId(novelUrl, sourceId)?.let { return it }
+        val toInsert = Novel.create().copy(
+            source = sourceId,
+            url = novelUrl,
+            title = novelTitle,
+            dateAdded = System.currentTimeMillis(),
+        )
+        val id = novelRepository.insertNovel(toInsert) ?: error("Could not insert novel")
+        return toInsert.copy(id = id)
+    }
+
+    /** Adds chapters that are new to the database; existing ones keep their read state. */
+    private suspend fun syncChapters(source: NovelSource, details: SNovel): List<NovelChapter> {
+        val remote = source.getChapterList(details)
+        val known = chapterRepository.getChapterByNovelId(novelId).associateBy { it.url }
+        val new = remote.filterNot { known.containsKey(it.url) }
+            .mapIndexed { index, chapter -> chapter.toNovelChapter(novelId, known.size + index) }
+        if (new.isNotEmpty()) chapterRepository.addAll(new)
+        return chapterRepository.getChapterByNovelId(novelId).sortedBy { it.sourceOrder }
+    }
+
+    private fun observeFavorite() {
+        screenModelScope.launch {
+            novelRepository.getNovelByIdAsFlow(novelId).collect { novel ->
+                _state.update { it.copy(favorite = novel.favorite) }
+            }
+        }
+    }
+
+    fun toggleFavorite() {
+        if (novelId == -1L) return
+        screenModelScope.launch {
+            novelRepository.updateNovel(
+                NovelUpdate(id = novelId, favorite = !_state.value.favorite),
+            )
+        }
+    }
+
+    private fun Novel.toSNovel(): SNovel = SNovel.create().also {
+        it.url = url
+        it.title = title
+    }
+
+    private fun SNovelChapter.toNovelChapter(novelId: Long, order: Int): NovelChapter =
+        NovelChapter.create().copy(
+            novelId = novelId,
+            url = url,
+            name = name,
+            dateUpload = date_upload,
+            chapterNumber = chapter_number.toDouble(),
+            sourceOrder = order.toLong(),
+            dateFetch = System.currentTimeMillis(),
+        )
+
     data class State(
         val loading: Boolean = true,
+        val favorite: Boolean = false,
         val description: String? = null,
-        val chapters: List<ChapterUi> = emptyList(),
+        val chapters: List<NovelChapter> = emptyList(),
         val error: String? = null,
     )
 }

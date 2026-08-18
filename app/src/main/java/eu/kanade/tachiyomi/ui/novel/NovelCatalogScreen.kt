@@ -36,21 +36,26 @@ import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.source.novel.GutenbergNovelSource
+import eu.kanade.tachiyomi.source.novel.NovelSourceManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import tachiyomi.presentation.core.components.material.Scaffold
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 
 data class NovelUi(val url: String, val title: String, val author: String?)
 
-class NovelCatalogScreen : Screen() {
+/** Browses a single novel source. Source picking moves into the Browse tab in a later step. */
+class NovelCatalogScreen(
+    private val sourceId: Long? = null,
+) : Screen() {
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { NovelCatalogScreenModel() }
+        val screenModel = rememberScreenModel { NovelCatalogScreenModel(sourceId) }
         val state by screenModel.state.collectAsState()
         var query by remember { mutableStateOf("") }
 
@@ -58,7 +63,7 @@ class NovelCatalogScreen : Screen() {
             topBar = {
                 AppBar(
                     title = "Novels",
-                    subtitle = "Project Gutenberg",
+                    subtitle = state.sourceName,
                     navigateUp = navigator::pop,
                 )
             },
@@ -93,7 +98,13 @@ class NovelCatalogScreen : Screen() {
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable {
-                                        navigator.push(NovelDetailScreen(novel.url, novel.title))
+                                        navigator.push(
+                                            NovelDetailScreen(
+                                                sourceId = screenModel.sourceId,
+                                                novelUrl = novel.url,
+                                                novelTitle = novel.title,
+                                            ),
+                                        )
                                     }
                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                             ) {
@@ -115,11 +126,17 @@ class NovelCatalogScreen : Screen() {
     }
 }
 
-class NovelCatalogScreenModel : ScreenModel {
+class NovelCatalogScreenModel(
+    requestedSourceId: Long?,
+    private val sourceManager: NovelSourceManager = Injekt.get(),
+) : ScreenModel {
 
-    private val source = GutenbergNovelSource()
+    private val source = requestedSourceId?.let(sourceManager::get)
+        ?: sourceManager.sources.value.first()
 
-    private val _state = MutableStateFlow(State())
+    val sourceId: Long = source.id
+
+    private val _state = MutableStateFlow(State(sourceName = source.name))
     val state = _state.asStateFlow()
 
     init {
@@ -146,6 +163,7 @@ class NovelCatalogScreenModel : ScreenModel {
 
     data class State(
         val loading: Boolean = true,
+        val sourceName: String = "",
         val novels: List<NovelUi> = emptyList(),
         val error: String? = null,
     )
