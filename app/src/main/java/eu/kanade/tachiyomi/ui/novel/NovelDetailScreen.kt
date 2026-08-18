@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
+import androidx.compose.material.icons.outlined.Label
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -26,6 +27,7 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.util.Screen
@@ -33,11 +35,18 @@ import eu.kanade.tachiyomi.novelsource.NovelSource
 import eu.kanade.tachiyomi.novelsource.model.SNovel
 import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
 import eu.kanade.tachiyomi.source.novel.NovelSourceManager
+import eu.kanade.tachiyomi.ui.category.CategoriesTab
+import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import tachiyomi.core.common.preference.CheckboxState
+import tachiyomi.core.common.preference.mapAsCheckboxState
+import tachiyomi.domain.category.model.Category
+import tachiyomi.domain.category.novel.repository.NovelCategoryRepository
 import tachiyomi.domain.entries.novel.model.Novel
 import tachiyomi.domain.entries.novel.model.NovelUpdate
 import tachiyomi.domain.entries.novel.repository.NovelRepository
@@ -66,17 +75,34 @@ class NovelDetailScreen(
                     navigateUp = navigator::pop,
                     actions = {
                         AppBarActions(
-                            actions = persistentListOf(
-                                AppBar.Action(
-                                    title = if (state.favorite) "Remove from library" else "Add to library",
-                                    icon = if (state.favorite) {
-                                        Icons.Filled.Favorite
-                                    } else {
-                                        Icons.Outlined.FavoriteBorder
-                                    },
-                                    onClick = screenModel::toggleFavorite,
-                                ),
-                            ),
+                            actions = persistentListOf<AppBar.AppBarAction>().builder()
+                                .apply {
+                                    add(
+                                        AppBar.Action(
+                                            title = if (state.favorite) {
+                                                "Remove from library"
+                                            } else {
+                                                "Add to library"
+                                            },
+                                            icon = if (state.favorite) {
+                                                Icons.Filled.Favorite
+                                            } else {
+                                                Icons.Outlined.FavoriteBorder
+                                            },
+                                            onClick = screenModel::toggleFavorite,
+                                        ),
+                                    )
+                                    if (state.favorite) {
+                                        add(
+                                            AppBar.Action(
+                                                title = "Set categories",
+                                                icon = Icons.Outlined.Label,
+                                                onClick = screenModel::showChangeCategoryDialog,
+                                            ),
+                                        )
+                                    }
+                                }
+                                .build(),
                         )
                     },
                 )
@@ -132,6 +158,18 @@ class NovelDetailScreen(
                 }
             }
         }
+
+        state.categoryDialogSelection?.let { selection ->
+            ChangeCategoryDialog(
+                initialSelection = selection,
+                onDismissRequest = screenModel::dismissCategoryDialog,
+                onEditCategories = {
+                    navigator.push(CategoriesTab)
+                    CategoriesTab.showNovelCategory()
+                },
+                onConfirm = { include, _ -> screenModel.setCategories(include) },
+            )
+        }
     }
 }
 
@@ -142,6 +180,7 @@ class NovelDetailScreenModel(
     private val sourceManager: NovelSourceManager = Injekt.get(),
     private val novelRepository: NovelRepository = Injekt.get(),
     private val chapterRepository: NovelChapterRepository = Injekt.get(),
+    private val categoryRepository: NovelCategoryRepository = Injekt.get(),
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(State())
@@ -223,11 +262,52 @@ class NovelDetailScreenModel(
     fun toggleFavorite() {
         if (novelId == -1L) return
         screenModelScope.launch {
-            novelRepository.updateNovel(
-                NovelUpdate(id = novelId, favorite = !_state.value.favorite),
-            )
+            if (_state.value.favorite) {
+                novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = false))
+                novelRepository.setNovelCategories(novelId, emptyList())
+                return@launch
+            }
+            // Adding to the library: let the user pick categories first, as Mihon does.
+            if (userCategories().isEmpty()) {
+                novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = true))
+            } else {
+                showChangeCategoryDialog()
+            }
         }
     }
+
+    fun showChangeCategoryDialog() {
+        if (novelId == -1L) return
+        screenModelScope.launch {
+            val categories = userCategories()
+            val selected = categoryRepository.getCategoriesByNovelId(novelId).map { it.id }
+            _state.update {
+                it.copy(
+                    categoryDialogSelection = categories
+                        .mapAsCheckboxState { category -> category.id in selected }
+                        .toImmutableList(),
+                )
+            }
+        }
+    }
+
+    fun dismissCategoryDialog() {
+        _state.update { it.copy(categoryDialogSelection = null) }
+    }
+
+    fun setCategories(categoryIds: List<Long>) {
+        if (novelId == -1L) return
+        screenModelScope.launch {
+            novelRepository.setNovelCategories(novelId, categoryIds)
+            if (!_state.value.favorite) {
+                novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = true))
+            }
+            dismissCategoryDialog()
+        }
+    }
+
+    private suspend fun userCategories(): List<Category> =
+        categoryRepository.getAllNovelCategories().filterNot(Category::isSystemCategory)
 
     private fun Novel.toSNovel(): SNovel = SNovel.create().also {
         it.url = url
@@ -250,6 +330,7 @@ class NovelDetailScreenModel(
         val favorite: Boolean = false,
         val description: String? = null,
         val chapters: List<NovelChapter> = emptyList(),
+        val categoryDialogSelection: ImmutableList<CheckboxState<Category>>? = null,
         val error: String? = null,
     )
 }
