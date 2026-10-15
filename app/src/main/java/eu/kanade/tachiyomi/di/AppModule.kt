@@ -5,11 +5,14 @@ import android.os.Build
 import androidx.core.content.ContextCompat
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
+import aniyomi.core.common.torrent.TorrentServerApi
+import aniyomi.core.common.torrent.TorrentServerUtils
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import data.History
 import data.Mangas
 import dataanime.Animehistory
 import dataanime.Animes
+import dataanime.Episodes
 import datanovel.Novelhistory
 import datanovel.Novels
 import eu.kanade.domain.track.anime.store.DelayedAnimeTrackingStore
@@ -47,6 +50,7 @@ import tachiyomi.data.Database
 import tachiyomi.data.DateColumnAdapter
 import tachiyomi.data.FetchTypeColumnAdapter
 import tachiyomi.data.MangaUpdateStrategyColumnAdapter
+import tachiyomi.data.MemoColumnAdapter
 import tachiyomi.data.StringListColumnAdapter
 import tachiyomi.data.handlers.anime.AndroidAnimeDatabaseHandler
 import tachiyomi.data.handlers.anime.AnimeDatabaseHandler
@@ -174,6 +178,10 @@ class AppModule(val app: Application) : InjektModule {
                     genreAdapter = StringListColumnAdapter,
                     update_strategyAdapter = AnimeUpdateStrategyColumnAdapter,
                     fetch_typeAdapter = FetchTypeColumnAdapter,
+                    memoAdapter = MemoColumnAdapter,
+                ),
+                episodesAdapter = Episodes.Adapter(
+                    memoAdapter = MemoColumnAdapter,
                 ),
             )
         }
@@ -272,6 +280,9 @@ class AppModule(val app: Application) : InjektModule {
         addSingletonFactory { StorageManager(app, get()) }
 
         addSingletonFactory { ExternalIntents() }
+
+        addSingletonFactory { TorrentServerApi(get(), get()) }
+        addSingletonFactory { TorrentServerUtils(get(), get()) }
 
         // Asynchronously init expensive components for a faster cold start
         ContextCompat.getMainExecutor(app).execute {

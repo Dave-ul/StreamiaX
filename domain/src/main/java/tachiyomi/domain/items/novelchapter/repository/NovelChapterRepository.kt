@@ -3,6 +3,7 @@ package tachiyomi.domain.items.novelchapter.repository
 import kotlinx.coroutines.flow.Flow
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
+import tachiyomi.domain.items.novelchapter.model.NovelHistoryItem
 import java.util.Date
 
 interface NovelChapterRepository {
@@ -28,8 +29,10 @@ interface NovelChapterRepository {
     /**
      * Records a reading session against [chapterId].
      *
-     * Novel history lives here rather than behind its own repository because a single upsert is
-     * the whole surface; split it out once history gains its own screen and queries.
+     * Novel history lives here rather than behind its own repository because it is one upsert and
+     * one list; split it out once it grows (delete, search).
      */
     suspend fun upsertHistory(chapterId: Long, readAt: Date, sessionReadDuration: Long)
+
+    fun getRecentHistoryAsFlow(): Flow<List<NovelHistoryItem>>
 }

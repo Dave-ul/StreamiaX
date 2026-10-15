@@ -10,11 +10,21 @@ The format is a modified version of [Keep a Changelog](https://keepachangelog.co
 - `Fixed` - for any bug fixes.
 - `Other` - for technical stuff.
 
-## Unreleased
+## [v0.18.2.1] - 2026-09-14
 
 ### Added
 
+- Added support for extensions-lib v17
+
+## [v0.18.2.0] - 2026-09-14
+
+### Added
+
+- Added related entries support ([@quickdesh](https://github.com/quickdesh)) ([#2378](https://github.com/aniyomiorg/aniyomi/pull/2378))
 - Added a description for the horizontal seek gesture setting ([@kenkoro](https://github.com/kenkoro)) ([#2224](https://github.com/aniyomiorg/aniyomi/pull/2224))
+- Added an http server for use in extensions ([@Secozzi](https://github.com/Secozzi)) ([#2348](https://github.com/aniyomiorg/aniyomi/pull/2348), [#2368](https://github.com/aniyomiorg/aniyomi/pull/2368))
+- Added support for thumbnail preview when seeking ([@Secozzi](https://github.com/Secozzi)) ([#2343](https://github.com/aniyomiorg/aniyomi/pull/2343))
+- Add torrent streaming support ([@Secozzi](https://github.com/Secozzi)) ([#2346](https://github.com/aniyomiorg/aniyomi/pull/2346))
 
 ### Fixed
 

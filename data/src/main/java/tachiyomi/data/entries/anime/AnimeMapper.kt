@@ -3,6 +3,7 @@ package tachiyomi.data.entries.anime
 import aniyomi.domain.anime.SeasonAnime
 import eu.kanade.tachiyomi.animesource.model.AnimeUpdateStrategy
 import eu.kanade.tachiyomi.animesource.model.FetchType
+import kotlinx.serialization.json.JsonObject
 import tachiyomi.domain.entries.anime.model.Anime
 import tachiyomi.domain.library.anime.LibraryAnime
 import tachiyomi.domain.source.anime.model.DeletableAnime
@@ -41,6 +42,7 @@ object AnimeMapper {
         seasonSourceOrder: Long,
         backgroundUrl: String?,
         backgroundLastModified: Long,
+        memo: JsonObject,
     ): Anime = Anime(
         id = id,
         source = source,
@@ -72,6 +74,7 @@ object AnimeMapper {
         seasonFlags = seasonFlags,
         seasonNumber = seasonNumber,
         seasonSourceOrder = seasonSourceOrder,
+        memo = memo,
     )
 
     fun mapLibraryAnime(
@@ -106,6 +109,7 @@ object AnimeMapper {
         seasonSourceOrder: Long,
         backgroundUrl: String?,
         backgroundLastModified: Long,
+        memo: JsonObject,
         totalCount: Long,
         seenCount: Double,
         latestUpload: Long,
@@ -147,6 +151,7 @@ object AnimeMapper {
             seasonSourceOrder,
             backgroundUrl,
             backgroundLastModified,
+            memo,
         ),
         category = category,
         totalCount = totalCount,
@@ -190,6 +195,7 @@ object AnimeMapper {
         seasonSourceOrder: Long,
         backgroundUrl: String?,
         backgroundLastModified: Long,
+        memo: JsonObject,
         totalCount: Long,
         seenCount: Double,
         latestUpload: Long,
@@ -230,6 +236,7 @@ object AnimeMapper {
             seasonSourceOrder,
             backgroundUrl,
             backgroundLastModified,
+            memo,
         ),
         totalCount = totalCount,
         seenCount = seenCount.toLong(),
@@ -238,6 +245,75 @@ object AnimeMapper {
         latestUpload = latestUpload,
         fetchedAt = fetchedAt,
         lastSeen = lastSeen,
+    )
+
+    fun mapRelatedAnime(
+        id: Long,
+        source: Long,
+        url: String,
+        artist: String?,
+        author: String?,
+        description: String?,
+        genre: List<String>?,
+        title: String,
+        status: Long,
+        thumbnailUrl: String?,
+        favorite: Boolean,
+        lastUpdate: Long?,
+        nextUpdate: Long?,
+        initialized: Boolean,
+        viewerFlags: Long,
+        chapterFlags: Long,
+        coverLastModified: Long,
+        dateAdded: Long,
+        updateStrategy: AnimeUpdateStrategy,
+        calculateInterval: Long,
+        lastModifiedAt: Long,
+        favoriteModifiedAt: Long?,
+        version: Long,
+        isSyncing: Long,
+        fetchType: FetchType,
+        parentId: Long?,
+        seasonFlags: Long,
+        seasonNumber: Double,
+        seasonSourceOrder: Long,
+        backgroundUrl: String?,
+        backgroundLastModified: Long,
+        memo: JsonObject,
+        name: String,
+    ): Pair<String, Anime> = name to mapAnime(
+        id,
+        source,
+        url,
+        artist,
+        author,
+        description,
+        genre,
+        title,
+        status,
+        thumbnailUrl,
+        favorite,
+        lastUpdate,
+        nextUpdate,
+        initialized,
+        viewerFlags,
+        chapterFlags,
+        coverLastModified,
+        dateAdded,
+        updateStrategy,
+        calculateInterval,
+        lastModifiedAt,
+        favoriteModifiedAt,
+        version,
+        isSyncing,
+        fetchType,
+        parentId,
+        seasonFlags,
+        seasonNumber,
+        seasonSourceOrder,
+        backgroundUrl,
+        backgroundLastModified,
+        memo,
     )
 
     fun mapDeletableAnime(
