@@ -30,7 +30,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -64,17 +67,29 @@ data class IndexedSegment(
 
 @Composable
 fun SeekbarWithTimers(
-    position: Float,
+    playerPosition: Float,
+    seekPosition: Float,
+    isGestureSeeking: Boolean,
+    isSeeking: Boolean,
     duration: Float,
     readAheadValue: Float,
     onValueChange: (Float) -> Unit,
-    onValueChangeFinished: () -> Unit,
+    onValueChangeFinished: (Float) -> Unit,
     timersInverted: Pair<Boolean, Boolean>,
     positionTimerOnClick: () -> Unit,
     durationTimerOnCLick: () -> Unit,
     chapters: ImmutableList<Segment>,
     modifier: Modifier = Modifier,
 ) {
+    var internalSeekPosition by remember { mutableFloatStateOf(0f) }
+    val position = if (isGestureSeeking) {
+        seekPosition
+    } else if (isSeeking) {
+        internalSeekPosition
+    } else {
+        playerPosition
+    }
+
     val clickEvent = LocalPlayerButtonsClickEvent.current
     Row(
         modifier = modifier.height(48.dp),
@@ -93,8 +108,13 @@ fun SeekbarWithTimers(
         Seeker(
             value = position.coerceIn(0f, duration),
             range = 0f..duration,
-            onValueChange = onValueChange,
-            onValueChangeFinished = onValueChangeFinished,
+            onValueChange = {
+                internalSeekPosition = it
+                onValueChange(it)
+            },
+            onValueChangeFinished = {
+                onValueChangeFinished(internalSeekPosition)
+            },
             readAheadValue = readAheadValue,
             segments = chapters
                 .filter { it.start in 0f..duration }
@@ -104,7 +124,8 @@ fun SeekbarWithTimers(
                         persistentListOf(Segment("", 0f)) + it
                     } else {
                         it
-                    } + it
+                    } +
+                        it
                 },
             modifier = Modifier.weight(1f),
             colors = SeekerDefaults.seekerColors(
@@ -154,6 +175,9 @@ fun VideoTimer(
 private fun PreviewSeekBar() {
     SeekbarWithTimers(
         5f,
+        5f,
+        false,
+        false,
         20f,
         4f,
         {},

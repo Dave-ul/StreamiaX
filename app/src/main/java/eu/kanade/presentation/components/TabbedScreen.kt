@@ -53,12 +53,14 @@ fun TabbedScreen(
                 val tab = tabs[state.currentPage]
                 val searchEnabled = tab.searchEnabled
 
-                val actualQuery = when (state.currentPage % 2) {
-                    1 -> mangaSearchQuery // History and Browse
+                // A tab with its own search (novel tabs) wins over the anime/manga page-parity wiring.
+                val actualQuery = when {
+                    tab.onChangeSearchQuery != null -> tab.searchQuery
+                    state.currentPage % 2 == 1 -> mangaSearchQuery // History and Browse
                     else -> animeSearchQuery
                 }
 
-                val actualOnChange = when (state.currentPage % 2) {
+                val actualOnChange = tab.onChangeSearchQuery ?: when (state.currentPage % 2) {
                     1 -> onChangeMangaSearchQuery // History and Browse
                     else -> onChangeAnimeSearchQuery
                 }
@@ -131,6 +133,8 @@ data class TabContent(
     val numberTitle: Int = 0,
     val cancelAction: () -> Unit = {},
     val navigateUp: (() -> Unit)? = null,
+    val searchQuery: String? = null,
+    val onChangeSearchQuery: ((String?) -> Unit)? = null,
 )
 
 @Composable
