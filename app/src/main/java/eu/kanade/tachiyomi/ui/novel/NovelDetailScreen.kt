@@ -3,15 +3,19 @@ package eu.kanade.tachiyomi.ui.novel
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.outlined.FavoriteBorder
 import androidx.compose.material.icons.outlined.Label
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -30,10 +34,10 @@ import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.category.components.ChangeCategoryDialog
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
+import eu.kanade.presentation.entries.components.ItemCover
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.novelsource.NovelSource
 import eu.kanade.tachiyomi.novelsource.model.SNovel
-import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
 import eu.kanade.tachiyomi.source.novel.NovelSourceManager
 import eu.kanade.tachiyomi.ui.category.CategoriesTab
 import kotlinx.collections.immutable.ImmutableList
@@ -52,7 +56,9 @@ import tachiyomi.domain.entries.novel.model.NovelUpdate
 import tachiyomi.domain.entries.novel.repository.NovelRepository
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
 import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
+import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
@@ -79,11 +85,9 @@ class NovelDetailScreen(
                                 .apply {
                                     add(
                                         AppBar.Action(
-                                            title = if (state.favorite) {
-                                                "Remove from library"
-                                            } else {
-                                                "Add to library"
-                                            },
+                                            title = stringResource(
+                                                if (state.favorite) MR.strings.remove_from_library else MR.strings.add_to_library,
+                                            ),
                                             icon = if (state.favorite) {
                                                 Icons.Filled.Favorite
                                             } else {
@@ -92,10 +96,17 @@ class NovelDetailScreen(
                                             onClick = screenModel::toggleFavorite,
                                         ),
                                     )
+                                    add(
+                                        AppBar.Action(
+                                            title = stringResource(MR.strings.action_webview_refresh),
+                                            icon = Icons.Outlined.Refresh,
+                                            onClick = screenModel::refresh,
+                                        ),
+                                    )
                                     if (state.favorite) {
                                         add(
                                             AppBar.Action(
-                                                title = "Set categories",
+                                                title = stringResource(MR.strings.action_move_category),
                                                 icon = Icons.Outlined.Label,
                                                 onClick = screenModel::showChangeCategoryDialog,
                                             ),
@@ -126,15 +137,15 @@ class NovelDetailScreen(
                     Text("Error: ${state.error}")
                 }
                 else -> LazyColumn(modifier = Modifier.padding(contentPadding)) {
-                    if (!state.description.isNullOrBlank()) {
-                        item {
-                            Text(
-                                state.description!!,
-                                modifier = Modifier.padding(16.dp),
-                                style = MaterialTheme.typography.bodyMedium,
-                            )
-                            HorizontalDivider()
-                        }
+                    item {
+                        NovelHeader(
+                            title = novelTitle,
+                            info = state.info,
+                            resumeChapter = state.chapters.firstOrNull { !it.read },
+                            started = state.chapters.any { it.read },
+                            onResume = { navigator.push(NovelReaderScreen(it.id)) },
+                        )
+                        HorizontalDivider()
                     }
                     items(state.chapters, key = { it.id }) { chapter ->
                         Column(
@@ -173,6 +184,68 @@ class NovelDetailScreen(
     }
 }
 
+data class NovelInfo(
+    val cover: String?,
+    val author: String?,
+    val status: Int,
+    val genres: String?,
+    val description: String?,
+)
+
+@Composable
+private fun NovelHeader(
+    title: String,
+    info: NovelInfo?,
+    resumeChapter: NovelChapter?,
+    started: Boolean,
+    onResume: (NovelChapter) -> Unit,
+) {
+    Column(Modifier.padding(16.dp)) {
+        Row {
+            ItemCover.Book(data = info?.cover, modifier = Modifier.width(100.dp))
+            Column(Modifier.padding(start = 16.dp)) {
+                Text(title, style = MaterialTheme.typography.titleMedium)
+                Text(
+                    info?.author?.takeIf { it.isNotBlank() } ?: stringResource(MR.strings.unknown_author),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    stringResource(novelStatusText(info?.status ?: SNovel.UNKNOWN)),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (resumeChapter != null) {
+                    Button(onClick = { onResume(resumeChapter) }, modifier = Modifier.padding(top = 8.dp)) {
+                        Text(stringResource(if (started) MR.strings.action_resume else MR.strings.action_start))
+                    }
+                }
+            }
+        }
+        info?.genres?.takeIf { it.isNotBlank() }?.let {
+            Text(
+                it,
+                modifier = Modifier.padding(top = 12.dp),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        info?.description?.takeIf { it.isNotBlank() }?.let {
+            Text(it, modifier = Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+}
+
+private fun novelStatusText(status: Int) = when (status) {
+    SNovel.ONGOING -> MR.strings.ongoing
+    SNovel.COMPLETED -> MR.strings.completed
+    SNovel.LICENSED -> MR.strings.licensed
+    SNovel.PUBLISHING_FINISHED -> MR.strings.publishing_finished
+    SNovel.CANCELLED -> MR.strings.cancelled
+    SNovel.ON_HIATUS -> MR.strings.on_hiatus
+    else -> MR.strings.unknown_status
+}
+
 class NovelDetailScreenModel(
     private val sourceId: Long,
     private val novelUrl: String,
@@ -187,6 +260,7 @@ class NovelDetailScreenModel(
     val state = _state.asStateFlow()
 
     private var novelId: Long = -1
+    private var observingFavorite = false
 
     init {
         load()
@@ -196,6 +270,11 @@ class NovelDetailScreenModel(
      * Novels are persisted on first open with `favorite = false`, the way Mihon treats manga, so
      * chapters always have a stable id for the reader to record progress against.
      */
+    fun refresh() {
+        _state.update { it.copy(loading = true, error = null) }
+        load()
+    }
+
     private fun load() {
         screenModelScope.launch {
             runCatching {
@@ -217,12 +296,22 @@ class NovelDetailScreenModel(
                 )
 
                 val chapters = syncChapters(source, details)
-                details.description to chapters
-            }.onSuccess { (description, chapters) ->
+                val info = NovelInfo(
+                    cover = details.thumbnail_url,
+                    author = details.author,
+                    status = details.status,
+                    genres = details.genre,
+                    description = details.description,
+                )
+                info to chapters
+            }.onSuccess { (info, chapters) ->
                 _state.update {
-                    it.copy(loading = false, description = description, chapters = chapters)
+                    it.copy(loading = false, info = info, chapters = chapters)
                 }
-                observeFavorite()
+                if (!observingFavorite) {
+                    observingFavorite = true
+                    observeFavorite()
+                }
             }.onFailure { e ->
                 _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
             }
@@ -241,13 +330,14 @@ class NovelDetailScreenModel(
         return toInsert.copy(id = id)
     }
 
-    /** Adds chapters that are new to the database; existing ones keep their read state. */
+    /** Brings the stored chapters in line with the source; read state survives (see [planChapterSync]). */
     private suspend fun syncChapters(source: NovelSource, details: SNovel): List<NovelChapter> {
         val remote = source.getChapterList(details)
-        val known = chapterRepository.getChapterByNovelId(novelId).associateBy { it.url }
-        val new = remote.filterNot { known.containsKey(it.url) }
-            .mapIndexed { index, chapter -> chapter.toNovelChapter(novelId, known.size + index) }
-        if (new.isNotEmpty()) chapterRepository.addAll(new)
+        val known = chapterRepository.getChapterByNovelId(novelId)
+        val plan = planChapterSync(novelId, remote, known, System.currentTimeMillis())
+        if (plan.toAdd.isNotEmpty()) chapterRepository.addAll(plan.toAdd)
+        if (plan.toUpdate.isNotEmpty()) chapterRepository.updateAll(plan.toUpdate)
+        if (plan.toRemove.isNotEmpty()) chapterRepository.removeChaptersWithIds(plan.toRemove)
         return chapterRepository.getChapterByNovelId(novelId).sortedBy { it.sourceOrder }
     }
 
@@ -314,21 +404,10 @@ class NovelDetailScreenModel(
         it.title = title
     }
 
-    private fun SNovelChapter.toNovelChapter(novelId: Long, order: Int): NovelChapter =
-        NovelChapter.create().copy(
-            novelId = novelId,
-            url = url,
-            name = name,
-            dateUpload = date_upload,
-            chapterNumber = chapter_number.toDouble(),
-            sourceOrder = order.toLong(),
-            dateFetch = System.currentTimeMillis(),
-        )
-
     data class State(
         val loading: Boolean = true,
         val favorite: Boolean = false,
-        val description: String? = null,
+        val info: NovelInfo? = null,
         val chapters: List<NovelChapter> = emptyList(),
         val categoryDialogSelection: ImmutableList<CheckboxState<Category>>? = null,
         val error: String? = null,
