@@ -1,0 +1,18 @@
+{
+  "name": "streamiax-lnreader-libs",
+  "private": true,
+  "description": "Libraries lnreader plugins require(), bundled for QuickJS into app/src/main/assets/lnreader/libs.js",
+  "scripts": {
+    "build": "esbuild entry.js --bundle --minify --format=iife --target=es2019 --platform=neutral --main-fields=main,module --outfile=../../assets/lnreader/libs.js",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "cheerio": "1.0.0-rc.12",
+    "dayjs": "1.11.13",
+    "whatwg-url-without-unicode": "8.0.0-3"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.0",
+    "quickjs-emscripten": "0.31.0"
+  }
+}
