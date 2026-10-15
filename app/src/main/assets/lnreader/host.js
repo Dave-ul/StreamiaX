@@ -176,6 +176,25 @@
   g.atob = function (s) { return __native.atob(String(s)); };
   g.btoa = function (s) { return __native.btoa(String(s)); };
 
+  // UTF-8 only, which is all plugins ask for.
+  function TextEncoder() { this.encoding = 'utf-8'; }
+  TextEncoder.prototype.encode = function (s) {
+    var bin = unescape(encodeURIComponent(String(s === undefined ? '' : s)));
+    var out = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  };
+  function TextDecoder() { this.encoding = 'utf-8'; }
+  TextDecoder.prototype.decode = function (bytes) {
+    if (!bytes) return '';
+    var u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes.buffer || bytes);
+    var bin = '';
+    for (var i = 0; i < u8.length; i += 0x8000) bin += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000));
+    try { return decodeURIComponent(escape(bin)); } catch (e) { return bin; }
+  };
+  g.TextEncoder = TextEncoder;
+  g.TextDecoder = TextDecoder;
+
   function FormData() { this._data = []; }
   FormData.prototype.append = function (k, v) { this._data.push([String(k), String(v)]); };
   FormData.prototype['delete'] = function (k) {
