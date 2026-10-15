@@ -21,7 +21,7 @@ It keeps every Aniyomi feature and adds two integrations:
 | Integration | Status | Approach |
 |---|---|---|
 | Stremio add-ons | in progress | Native `AnimeHttpSource` speaking the Stremio add-on HTTP protocol (catalog/meta/stream) |
-| Light novels | in progress | New `novelsource` hierarchy mirroring `animesource`/`source`, with a dedicated text reader and DB tables |
+| Light novels | in progress | New `novelsource` hierarchy mirroring `animesource`/`source`, with a dedicated text reader and DB tables; lnreader JS plugins install from the official index and run in QuickJS |
 
 ## Build
 
@@ -31,6 +31,19 @@ It keeps every Aniyomi feature and adds two integrations:
 
 Produces split APKs under `app/build/outputs/apk/release/` (universal + per-ABI).
 JDK 17 required. The mpv player ships as a prebuilt AAR (`aniyomi-mpv-lib`), so no NDK toolchain is needed.
+
+### lnreader plugin host
+
+`app/src/main/assets/lnreader/host.js` is hand-written; `libs.js` next to it is generated
+(cheerio, htmlparser2, dayjs, URL) and committed, so Gradle needs no Node. To bump those
+libraries or check the host against real plugins:
+
+```bash
+cd app/src/main/js/lnreader-libs
+npm install
+npm run build                      # regenerates assets/lnreader/libs.js
+npm run smoke -- royalroad novelbin
+```
 
 ## Releases
 
