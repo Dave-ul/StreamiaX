@@ -412,6 +412,9 @@
     <string name="label_anime">Anime</string>
     <string name="label_manga">Manga</string>
     <string name="label_novel">Novels</string>
+    <string name="novel_reader_text_settings">Text settings</string>
+    <string name="novel_reader_font_size">Text size</string>
+    <string name="novel_reader_line_height">Line spacing</string>
     <string name="label_recent_anime_updates">Anime Updates</string>
     <string name="label_manga_sources">Manga Sources</string>
     <string name="label_anime_sources">Anime Sources</string>
