@@ -57,15 +57,20 @@ import androidx.lifecycle.viewModelScope
 import androidx.media.AudioAttributesCompat
 import androidx.media.AudioFocusRequestCompat
 import androidx.media.AudioManagerCompat
+import aniyomi.core.common.torrent.TorrentPreferences
+import aniyomi.core.common.torrent.TorrentServerApi
+import aniyomi.core.common.torrent.TorrentServerUtils
 import com.hippo.unifile.UniFile
 import eu.kanade.presentation.theme.TachiyomiTheme
 import eu.kanade.tachiyomi.animesource.model.ChapterType
 import eu.kanade.tachiyomi.animesource.model.Hoster
+import eu.kanade.tachiyomi.animesource.model.HttpServer
 import eu.kanade.tachiyomi.animesource.model.SerializableHoster.Companion.serialize
 import eu.kanade.tachiyomi.animesource.model.Video
 import eu.kanade.tachiyomi.animesource.online.AnimeHttpSource
 import eu.kanade.tachiyomi.data.notification.NotificationReceiver
 import eu.kanade.tachiyomi.data.notification.Notifications
+import eu.kanade.tachiyomi.data.torrent.service.TorrentServerService
 import eu.kanade.tachiyomi.databinding.PlayerLayoutBinding
 import eu.kanade.tachiyomi.network.NetworkPreferences
 import eu.kanade.tachiyomi.ui.base.activity.BaseActivity
@@ -106,6 +111,7 @@ import java.io.InputStream
 import java.io.OutputStream
 import kotlin.math.ceil
 import kotlin.math.floor
+import kotlin.time.Duration.Companion.seconds
 
 class PlayerActivity : BaseActivity() {
     private val viewModel by viewModels<PlayerViewModel>(factoryProducer = { PlayerViewModelProviderFactory(this) })
@@ -122,6 +128,9 @@ class PlayerActivity : BaseActivity() {
     private val advancedPlayerPreferences: AdvancedPlayerPreferences = Injekt.get()
     private val networkPreferences: NetworkPreferences = Injekt.get()
     private val storageManager: StorageManager = Injekt.get()
+    private val torrentServerApi: TorrentServerApi = Injekt.get()
+    private val torrentServerUtils: TorrentServerUtils = Injekt.get()
+    private val torrentPreferences: TorrentPreferences = Injekt.get()
 
     private var audioFocusRequest: AudioFocusRequestCompat? = null
     private var restoreAudioFocus: () -> Unit = {}
@@ -133,6 +142,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     private var pipReceiver: BroadcastReceiver? = null
+    private var httpServer: HttpServer? = null
 
     private val noisyReceiver = object : BroadcastReceiver() {
         var initialized = false
@@ -286,6 +296,9 @@ class PlayerActivity : BaseActivity() {
 
     override fun onDestroy() {
         player.isExiting = true
+
+        httpServer?.stop()
+        httpServer = null
 
         audioFocusRequest?.let {
             AudioManagerCompat.abandonAudioFocusRequest(audioManager, it)
@@ -991,7 +1004,7 @@ class PlayerActivity : BaseActivity() {
         viewModel.panelShown.update { _ -> Panels.None }
         viewModel.pause()
         viewModel.isLoading.update { _ -> true }
-        viewModel.resetHosterState()
+        viewModel.resetState()
 
         lifecycleScope.launch {
             viewModel.updateIsLoadingEpisode(true)
@@ -1051,6 +1064,8 @@ class PlayerActivity : BaseActivity() {
     fun setVideo(video: Video?, position: Long? = null) {
         if (player.isExiting) return
         if (video == null) return
+        httpServer?.stop()
+        httpServer = null
 
         setHttpOptions(video)
 
@@ -1075,15 +1090,50 @@ class PlayerActivity : BaseActivity() {
             "$option=\"$value\""
         }
 
-        MPVLib.command(
-            arrayOf(
-                "loadfile",
-                parseVideoUrl(video.videoUrl),
-                "replace",
-                "0",
-                videoOptions,
-            ),
-        )
+        if (torrentPreferences.torrServerEnable().get() &&
+            (
+                video.videoUrl.startsWith(torrentServerApi.hostUrl) ||
+                    video.videoUrl.startsWith("magnet") ||
+                    video.videoUrl.endsWith("torrent")
+                )
+        ) {
+            launchIO {
+                TorrentServerService.start()
+                torrentLinkHandler(video.videoUrl, video.videoTitle, videoOptions)
+            }
+        } else {
+            launchIO {
+                val httpSource = viewModel.currentSource.value as? AnimeHttpSource
+                var videoUrl: String = video.videoUrl
+                if (video.usesHttpServer() && httpSource != null) {
+                    val port = try {
+                        httpServer = httpSource.createHttpServer()
+                        httpServer?.start()
+                        httpServer?.listeningPort ?: 0
+                    } catch (e: Exception) {
+                        logcat(LogPriority.ERROR, e) { "Failed to start http server" }
+                        launchUI {
+                            toast(AYMR.strings.http_server_start_failure)
+                        }
+                        return@launchIO
+                    }
+
+                    val newVideo = video.copyHttpServer(port)
+                    videoUrl = newVideo.videoUrl
+                    viewModel.updateVideo(newVideo)
+                }
+
+                MPVLib.command(
+                    arrayOf(
+                        "loadfile",
+                        parseVideoUrl(videoUrl),
+                        "replace",
+                        "0",
+                        videoOptions,
+                    ),
+                )
+            }
+        }
     }
 
     /**
@@ -1098,6 +1148,52 @@ class PlayerActivity : BaseActivity() {
         }
         logcat(LogPriority.ERROR, error)
         finish()
+    }
+
+    private suspend fun torrentLinkHandler(videoUrl: String, title: String, videoOptions: String) {
+        var index = 0
+
+        // check if link is from localSource
+        if (videoUrl.startsWith("content://")) {
+            val videoInputStream = applicationContext.contentResolver.openInputStream(videoUrl.toUri())
+            val torrent = torrentServerApi.uploadTorrent(videoInputStream!!, title, false)
+            val torrentUrl = torrentServerUtils.getTorrentPlayLink(torrent, 0)
+
+            MPVLib.command(
+                arrayOf(
+                    "loadfile",
+                    torrentUrl,
+                    "replace",
+                    "0",
+                    videoOptions,
+                ),
+            )
+            return
+        }
+
+        // check if link is from magnet, in that check if index is present
+        if (videoUrl.startsWith("magnet")) {
+            if (videoUrl.contains("index=")) {
+                index = try {
+                    videoUrl.substringAfter("index=").substringBefore("&").toInt()
+                } catch (_: NumberFormatException) {
+                    0
+                }
+            }
+        }
+
+        val currentTorrent = torrentServerApi.addTorrent(videoUrl, title, "", "", false)
+        val videoTorrentUrl = torrentServerUtils.getTorrentPlayLink(currentTorrent, index)
+
+        MPVLib.command(
+            arrayOf(
+                "loadfile",
+                videoTorrentUrl,
+                "replace",
+                "0",
+                videoOptions,
+            ),
+        )
     }
 
     fun parseVideoUrl(videoUrl: String?): String? {
