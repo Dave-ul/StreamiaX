@@ -4,6 +4,10 @@
 -keep,allowoptimization class tachiyomi.**
 -keep,allowoptimization class mihon.**
 
+# QuickJS binds the lnreader bridge by reflection: R8 sees no callers and strips every method
+-keep class eu.kanade.tachiyomi.source.novel.js.JsNovelRuntime$NativeBridge { *; }
+-keep class eu.kanade.tachiyomi.source.novel.js.JsNovelRuntime$Bridge { *; }
+
 # Keep common dependencies used in extensions
 -keep,allowoptimization class androidx.preference.** { public protected *; }
 -keep,allowoptimization class android.content.** { *; }
