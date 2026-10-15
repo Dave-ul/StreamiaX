@@ -70,6 +70,11 @@ data object NovelLibraryTab : Tab {
         val navigator = LocalNavigator.currentOrThrow
         // Only reachable through More (pushed on the stack) when the nav style moves it there.
         val fromMore = currentNavigationStyle() == NavStyle.MOVE_NOVEL_TO_MORE
+        val navigateUp: (() -> Unit)? = if (fromMore) {
+            { navigator.pop() }
+        } else {
+            null
+        }
         val screenModel = rememberScreenModel { NovelLibraryScreenModel() }
         val state by screenModel.state.collectAsState()
         val scope = rememberCoroutineScope()
@@ -78,7 +83,7 @@ data object NovelLibraryTab : Tab {
             topBar = {
                 AppBar(
                     title = stringResource(AYMR.strings.label_novel),
-                    navigateUp = if (fromMore) navigator::pop else null,
+                    navigateUp = navigateUp,
                     actions = {
                         AppBarActions(
                             actions = persistentListOf(
