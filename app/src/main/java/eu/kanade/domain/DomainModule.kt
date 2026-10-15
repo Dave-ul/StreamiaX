@@ -3,6 +3,7 @@ package eu.kanade.domain
 import eu.kanade.domain.download.anime.interactor.DeleteEpisodeDownload
 import eu.kanade.domain.download.manga.interactor.DeleteChapterDownload
 import eu.kanade.domain.entries.anime.interactor.SetAnimeViewerFlags
+import eu.kanade.domain.entries.anime.interactor.SyncRelatedAnimeWithSource
 import eu.kanade.domain.entries.anime.interactor.SyncSeasonsWithSource
 import eu.kanade.domain.entries.anime.interactor.UpdateAnime
 import eu.kanade.domain.entries.manga.interactor.GetExcludedScanlators
@@ -47,15 +48,15 @@ import eu.kanade.domain.track.manga.interactor.RefreshMangaTracks
 import eu.kanade.domain.track.manga.interactor.SyncChapterProgressWithTrack
 import eu.kanade.domain.track.manga.interactor.TrackChapter
 import eu.kanade.tachiyomi.ui.player.utils.TrackSelect
-import mihon.data.repository.anime.AnimeExtensionRepoRepositoryImpl
+import mihon.data.extension.anime.repository.AnimeExtensionStoreRepositoryImpl
+import mihon.data.extension.anime.service.AnimeExtensionStoreService
 import mihon.data.repository.manga.MangaExtensionRepoRepositoryImpl
-import mihon.domain.extensionrepo.anime.interactor.CreateAnimeExtensionRepo
-import mihon.domain.extensionrepo.anime.interactor.DeleteAnimeExtensionRepo
-import mihon.domain.extensionrepo.anime.interactor.GetAnimeExtensionRepo
-import mihon.domain.extensionrepo.anime.interactor.GetAnimeExtensionRepoCount
-import mihon.domain.extensionrepo.anime.interactor.ReplaceAnimeExtensionRepo
-import mihon.domain.extensionrepo.anime.interactor.UpdateAnimeExtensionRepo
-import mihon.domain.extensionrepo.anime.repository.AnimeExtensionRepoRepository
+import mihon.domain.extension.anime.interactor.AddAnimeExtensionStore
+import mihon.domain.extension.anime.interactor.GetAnimeExtensionStoreCountAsFlow
+import mihon.domain.extension.anime.interactor.GetAnimeExtensionStores
+import mihon.domain.extension.anime.interactor.RemoveAnimeExtensionStore
+import mihon.domain.extension.anime.interactor.UpdateAnimeExtensionStores
+import mihon.domain.extension.anime.repository.AnimeExtensionStoreRepository
 import mihon.domain.extensionrepo.manga.interactor.CreateMangaExtensionRepo
 import mihon.domain.extensionrepo.manga.interactor.DeleteMangaExtensionRepo
 import mihon.domain.extensionrepo.manga.interactor.GetMangaExtensionRepo
@@ -66,12 +67,14 @@ import mihon.domain.extensionrepo.manga.repository.MangaExtensionRepoRepository
 import mihon.domain.extensionrepo.service.ExtensionRepoService
 import mihon.domain.items.chapter.interactor.FilterChaptersForDownload
 import mihon.domain.items.episode.interactor.FilterEpisodesForDownload
+import mihon.domain.source.interactor.UpdateAnimeFromRemote
 import mihon.domain.upcoming.anime.interactor.GetUpcomingAnime
 import mihon.domain.upcoming.manga.interactor.GetUpcomingManga
 import tachiyomi.data.category.anime.AnimeCategoryRepositoryImpl
 import tachiyomi.data.category.manga.MangaCategoryRepositoryImpl
 import tachiyomi.data.category.novel.NovelCategoryRepositoryImpl
 import tachiyomi.data.custombutton.CustomButtonRepositoryImpl
+import tachiyomi.data.entries.anime.AnimeRelationRepositoryImpl
 import tachiyomi.data.entries.anime.AnimeRepositoryImpl
 import tachiyomi.data.entries.manga.MangaRepositoryImpl
 import tachiyomi.data.entries.novel.NovelRepositoryImpl
@@ -130,10 +133,12 @@ import tachiyomi.domain.entries.anime.interactor.GetAnimeFavorites
 import tachiyomi.domain.entries.anime.interactor.GetAnimeWithEpisodesAndSeasons
 import tachiyomi.domain.entries.anime.interactor.GetDuplicateLibraryAnime
 import tachiyomi.domain.entries.anime.interactor.GetLibraryAnime
+import tachiyomi.domain.entries.anime.interactor.GetRelatedAnime
 import tachiyomi.domain.entries.anime.interactor.NetworkToLocalAnime
 import tachiyomi.domain.entries.anime.interactor.ResetAnimeViewerFlags
 import tachiyomi.domain.entries.anime.interactor.SetAnimeEpisodeFlags
 import tachiyomi.domain.entries.anime.interactor.SetAnimeSeasonFlags
+import tachiyomi.domain.entries.anime.repository.AnimeRelationRepository
 import tachiyomi.domain.entries.anime.repository.AnimeRepository
 import tachiyomi.domain.entries.manga.interactor.GetDuplicateLibraryManga
 import tachiyomi.domain.entries.manga.interactor.GetLibraryManga
@@ -261,6 +266,9 @@ class DomainModule : InjektModule {
         addSingletonFactory<NovelRepository> { NovelRepositoryImpl(get()) }
         addSingletonFactory<NovelCategoryRepository> { NovelCategoryRepositoryImpl(get()) }
         addSingletonFactory<NovelChapterRepository> { NovelChapterRepositoryImpl(get()) }
+        addSingletonFactory<AnimeRelationRepository> { AnimeRelationRepositoryImpl(get()) }
+        addFactory { GetRelatedAnime(get()) }
+        addFactory { SyncRelatedAnimeWithSource(get(), get(), get()) }
 
         addSingletonFactory<MangaRepository> { MangaRepositoryImpl(get()) }
         addFactory { GetDuplicateLibraryManga(get()) }
@@ -387,13 +395,13 @@ class DomainModule : InjektModule {
 
         addFactory { ExtensionRepoService(get(), get()) }
 
-        addSingletonFactory<AnimeExtensionRepoRepository> { AnimeExtensionRepoRepositoryImpl(get()) }
-        addFactory { GetAnimeExtensionRepo(get()) }
-        addFactory { GetAnimeExtensionRepoCount(get()) }
-        addFactory { CreateAnimeExtensionRepo(get(), get()) }
-        addFactory { DeleteAnimeExtensionRepo(get()) }
-        addFactory { ReplaceAnimeExtensionRepo(get()) }
-        addFactory { UpdateAnimeExtensionRepo(get(), get()) }
+        addSingletonFactory { AnimeExtensionStoreService(get(), get(), get()) }
+        addSingletonFactory<AnimeExtensionStoreRepository> { AnimeExtensionStoreRepositoryImpl(get(), get()) }
+        addFactory { AddAnimeExtensionStore(get()) }
+        addFactory { GetAnimeExtensionStoreCountAsFlow(get()) }
+        addFactory { GetAnimeExtensionStores(get()) }
+        addFactory { RemoveAnimeExtensionStore(get()) }
+        addFactory { UpdateAnimeExtensionStores(get()) }
         addFactory { ToggleAnimeIncognito(get()) }
         addFactory { GetAnimeIncognitoState(get(), get(), get()) }
 
@@ -416,5 +424,7 @@ class DomainModule : InjektModule {
         addFactory { ToggleFavoriteCustomButton(get()) }
 
         addFactory { TrackSelect(get(), get()) }
+
+        addFactory { UpdateAnimeFromRemote(get(), get(), get(), get(), get(), get(), get()) }
     }
 }

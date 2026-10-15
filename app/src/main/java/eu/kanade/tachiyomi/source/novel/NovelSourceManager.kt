@@ -1,6 +1,9 @@
 package eu.kanade.tachiyomi.source.novel
 
 import eu.kanade.tachiyomi.novelsource.NovelSource
+import eu.kanade.tachiyomi.source.novel.js.JsNovelSource
+import eu.kanade.tachiyomi.source.novel.js.LnReaderPlugin
+import eu.kanade.tachiyomi.source.novel.js.LnReaderPlugins
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,8 +19,8 @@ import java.util.concurrent.ConcurrentHashMap
 /**
  * Registry of available [NovelSource]s, the novel counterpart of `AndroidAnimeSourceManager`.
  *
- * Only built-in sources exist for now, so there is no extension manager, stub source or download
- * manager wiring here; JS plugin sources join [builtInSources] once the lnreader plugin host lands.
+ * Holds the built-in sources plus one [JsNovelSource] per installed lnreader plugin; there is no
+ * stub source or download manager wiring here.
  */
 class NovelSourceManager(
     private val handler: NovelDatabaseHandler,
@@ -25,8 +28,10 @@ class NovelSourceManager(
 
     private val scope = CoroutineScope(Job() + Dispatchers.IO)
 
+    val plugins = LnReaderPlugins()
+
     private val sourcesMap = ConcurrentHashMap<Long, NovelSource>(
-        builtInSources().associateBy { it.id },
+        (builtInSources() + plugins.installed().map(plugins::source)).associateBy { it.id },
     )
 
     private val _sources = MutableStateFlow(sourcesMap.values.toList())
@@ -43,6 +48,21 @@ class NovelSourceManager(
         sourcesMap[sourceKey]?.let { return it.name }
         return handler.awaitOneOrNull { novelsourcesQueries.findOne(sourceKey) }?.name
             ?: sourceKey.toString()
+    }
+
+    /** Installs or updates [plugin] and makes it available as a source right away. */
+    suspend fun installPlugin(plugin: LnReaderPlugin) {
+        val source = plugins.install(plugin)
+        (sourcesMap.put(source.id, source) as? JsNovelSource)?.close()
+        _sources.value = sourcesMap.values.toList()
+        registerSources(listOf(source))
+    }
+
+    fun uninstallPlugin(source: JsNovelSource) {
+        plugins.uninstall(source.plugin.id)
+        sourcesMap.remove(source.id)
+        source.close()
+        _sources.value = sourcesMap.values.toList()
     }
 
     private suspend fun registerSources(sources: Collection<NovelSource>) {
