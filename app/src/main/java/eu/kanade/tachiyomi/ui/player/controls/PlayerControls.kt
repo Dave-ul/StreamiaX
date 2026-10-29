@@ -586,6 +586,7 @@ fun PlayerControls(
         val currentSource by viewModel.currentSource.collectAsState()
         val showFailedHosters by playerPreferences.showFailedHosters().collectAsState()
         val emptyHosters by playerPreferences.showEmptyHosters().collectAsState()
+        val onlineSubtitles by viewModel.onlineSubtitles.state.collectAsState()
 
         PlayerSheets(
             sheetShown = sheetShown,
@@ -593,6 +594,10 @@ fun PlayerControls(
             selectedSubtitles = selectedSubtitles.toList().toImmutableList(),
             onAddSubtitle = viewModel::addSubtitle,
             onSelectSubtitle = viewModel::selectSub,
+            onSearchOnlineSubtitles = viewModel::openOnlineSubtitles,
+            onlineSubtitles = onlineSubtitles,
+            onSearchSubtitles = viewModel.onlineSubtitles::search,
+            onAddOnlineSubtitle = viewModel.onlineSubtitles::add,
             audioTracks = audioTracks.toImmutableList(),
             selectedAudio = selectedAudio,
             onAddAudio = viewModel::addAudio,

@@ -71,6 +71,7 @@ import eu.kanade.tachiyomi.data.saver.Location
 import eu.kanade.tachiyomi.data.track.TrackerManager
 import eu.kanade.tachiyomi.data.track.anilist.Anilist
 import eu.kanade.tachiyomi.data.track.myanimelist.MyAnimeList
+import eu.kanade.tachiyomi.source.anime.StremioAnimeSource
 import eu.kanade.tachiyomi.ui.player.controls.components.IndexedSegment
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.HosterState
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.getChangedAt
@@ -78,6 +79,9 @@ import eu.kanade.tachiyomi.ui.player.loader.EpisodeLoader
 import eu.kanade.tachiyomi.ui.player.loader.HosterLoader
 import eu.kanade.tachiyomi.ui.player.settings.GesturePreferences
 import eu.kanade.tachiyomi.ui.player.settings.PlayerPreferences
+import eu.kanade.tachiyomi.ui.player.settings.SubtitlePreferences
+import eu.kanade.tachiyomi.ui.player.subtitles.OnlineSubtitles
+import eu.kanade.tachiyomi.ui.player.subtitles.OnlineSubtitlesController
 import eu.kanade.tachiyomi.ui.player.utils.AniSkipApi
 import eu.kanade.tachiyomi.ui.player.utils.ChapterUtils.Companion.getStringRes
 import eu.kanade.tachiyomi.ui.player.utils.TrackSelect
@@ -169,6 +173,7 @@ class PlayerViewModel @JvmOverloads constructor(
     private val setAnimeViewerFlags: SetAnimeViewerFlags = Injekt.get(),
     internal val playerPreferences: PlayerPreferences = Injekt.get(),
     internal val gesturePreferences: GesturePreferences = Injekt.get(),
+    private val subtitlePreferences: SubtitlePreferences = Injekt.get(),
     private val basePreferences: BasePreferences = Injekt.get(),
     private val getCustomButtons: GetCustomButtons = Injekt.get(),
     private val trackSelect: TrackSelect = Injekt.get(),
@@ -315,6 +320,39 @@ class PlayerViewModel @JvmOverloads constructor(
     val remainingTime = _remainingTime.asStateFlow()
 
     val cachePath: String = activity.cacheDir.path
+
+    val onlineSubtitles = OnlineSubtitlesController(
+        scope = viewModelScope,
+        context = activity,
+        cacheDir = activity.cacheDir,
+        onDownloaded = { file, title -> MPVLib.command(arrayOf("sub-add", file.absolutePath, "select", title)) },
+    )
+
+    /** Opens the online subtitle search, prefilled from the playing episode. */
+    fun openOnlineSubtitles() {
+        val anime = currentAnime.value ?: return
+        val episode = currentEpisode.value
+        // Stremio entries carry the IMDb id, season and episode: "series/tt0944947:1:3", "movie/tt0111161".
+        val stremio = if (currentSource.value?.id == StremioAnimeSource.ID) {
+            episode?.url?.removePrefix("/")?.split("/", limit = 2)
+        } else {
+            null
+        }
+        val stremioIds = stremio?.getOrNull(1)?.split(":")
+        onlineSubtitles.open(
+            OnlineSubtitles.Query(
+                title = anime.title,
+                language = OnlineSubtitles.defaultLanguage(subtitlePreferences.preferredSubLanguages().get()),
+                season = stremioIds?.getOrNull(1)?.toIntOrNull() ?: OnlineSubtitles.seasonFromTitle(anime.title),
+                episode = stremioIds?.getOrNull(2)?.toIntOrNull()
+                    ?: episode?.episode_number?.takeIf { it > 0 }?.toInt(),
+                movie = stremio?.firstOrNull() == "movie",
+                imdbId = stremioIds?.firstOrNull()?.takeIf { it.startsWith("tt") },
+                localVideo = currentVideo.value?.videoUrl,
+            ),
+        )
+        showSheet(Sheets.OnlineSubtitles)
+    }
 
     private val _customButtons = MutableStateFlow<CustomButtonFetchState>(CustomButtonFetchState.Loading)
     val customButtons = _customButtons.asStateFlow()

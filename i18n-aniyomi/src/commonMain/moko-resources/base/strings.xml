@@ -442,6 +442,14 @@
     <string name="novel_reader_speech_pitch">Pitch</string>
     <string name="novel_reader_speech_next_chapter">Continue with the next chapter</string>
     <string name="novel_reader_translate_to">Translate to</string>
+    <string name="player_online_subtitles">Online subtitles</string>
+    <string name="player_online_subtitles_search">Search subtitles online</string>
+    <string name="player_online_subtitles_title">Title</string>
+    <string name="player_online_subtitles_empty">No subtitles found. Try another title or language.</string>
+    <string name="player_online_subtitles_error">Search failed: %1$s</string>
+    <string name="player_online_subtitles_downloads">%1$d downloads</string>
+    <string name="player_online_subtitles_file_match">matches this file</string>
+    <string name="player_online_subtitles_hi">hearing impaired</string>
     <string name="label_recent_anime_updates">Anime Updates</string>
     <string name="label_manga_sources">Manga Sources</string>
     <string name="label_anime_sources">Anime Sources</string>
