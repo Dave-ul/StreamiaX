@@ -8,6 +8,8 @@ CREATE TABLE novels_categories(
     ON DELETE CASCADE
 );
 
+CREATE UNIQUE INDEX novels_categories_unique ON novels_categories(novel_id, category_id);
+
 insert:
 INSERT INTO novels_categories(novel_id, category_id)
 VALUES (:novelId, :categoryId);

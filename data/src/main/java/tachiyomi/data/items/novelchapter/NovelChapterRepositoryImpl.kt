@@ -2,42 +2,49 @@ package tachiyomi.data.items.novelchapter
 
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
-import logcat.LogPriority
-import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.handlers.novel.NovelDatabaseHandler
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
 import tachiyomi.domain.items.novelchapter.model.NovelHistoryItem
 import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
+import tachiyomi.novel.data.NovelDatabase
 import java.util.Date
 
 class NovelChapterRepositoryImpl(
     private val handler: NovelDatabaseHandler,
 ) : NovelChapterRepository {
 
-    override suspend fun addAll(chapters: List<NovelChapter>): List<NovelChapter> {
-        return try {
-            handler.await(inTransaction = true) {
-                chapters.map { chapter ->
-                    novel_chaptersQueries.insert(
-                        novelId = chapter.novelId,
-                        url = chapter.url,
-                        name = chapter.name,
-                        read = chapter.read,
-                        bookmark = chapter.bookmark,
-                        lastPosition = chapter.lastPosition,
-                        chapterNumber = chapter.chapterNumber,
-                        sourceOrder = chapter.sourceOrder,
-                        dateFetch = chapter.dateFetch,
-                        dateUpload = chapter.dateUpload,
-                    )
-                    val lastInsertId = novel_chaptersQueries.selectLastInsertedRowId().executeAsOne()
-                    chapter.copy(id = lastInsertId)
+    // Errors are not caught here: a sync that fails must reach the screen, not look like "no chapters".
+    override suspend fun updateFromRemote(
+        removedIds: List<Long>,
+        added: List<NovelChapter>,
+        updated: List<NovelChapterUpdate>,
+    ): List<NovelChapter> {
+        return handler.await(inTransaction = true) {
+            if (removedIds.isNotEmpty()) novel_chaptersQueries.removeChaptersWithIds(removedIds)
+            val existing = added.map { it.novelId }
+                .distinct()
+                .flatMap { novelId ->
+                    novel_chaptersQueries.getChaptersByNovelId(novelId).executeAsList().map { novelId to it.url }
                 }
+                .toMutableSet()
+            val stored = added.filter { existing.add(it.novelId to it.url) }.map { chapter ->
+                novel_chaptersQueries.insert(
+                    novelId = chapter.novelId,
+                    url = chapter.url,
+                    name = chapter.name,
+                    read = chapter.read,
+                    bookmark = chapter.bookmark,
+                    lastPosition = chapter.lastPosition,
+                    chapterNumber = chapter.chapterNumber,
+                    sourceOrder = chapter.sourceOrder,
+                    dateFetch = chapter.dateFetch,
+                    dateUpload = chapter.dateUpload,
+                )
+                chapter.copy(id = novel_chaptersQueries.selectLastInsertedRowId().executeAsOne())
             }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e)
-            emptyList()
+            updated.forEach { updateChapter(it) }
+            stored
         }
     }
 
@@ -51,30 +58,24 @@ class NovelChapterRepositoryImpl(
 
     private suspend fun partialUpdate(vararg chapterUpdates: NovelChapterUpdate) {
         handler.await(inTransaction = true) {
-            chapterUpdates.forEach { chapterUpdate ->
-                novel_chaptersQueries.update(
-                    novelId = chapterUpdate.novelId,
-                    url = chapterUpdate.url,
-                    name = chapterUpdate.name,
-                    read = chapterUpdate.read,
-                    bookmark = chapterUpdate.bookmark,
-                    lastPosition = chapterUpdate.lastPosition,
-                    chapterNumber = chapterUpdate.chapterNumber,
-                    sourceOrder = chapterUpdate.sourceOrder,
-                    dateFetch = chapterUpdate.dateFetch,
-                    dateUpload = chapterUpdate.dateUpload,
-                    chapterId = chapterUpdate.id,
-                )
-            }
+            chapterUpdates.forEach { updateChapter(it) }
         }
     }
 
-    override suspend fun removeChaptersWithIds(chapterIds: List<Long>) {
-        try {
-            handler.await { novel_chaptersQueries.removeChaptersWithIds(chapterIds) }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e)
-        }
+    private fun NovelDatabase.updateChapter(chapterUpdate: NovelChapterUpdate) {
+        novel_chaptersQueries.update(
+            novelId = chapterUpdate.novelId,
+            url = chapterUpdate.url,
+            name = chapterUpdate.name,
+            read = chapterUpdate.read,
+            bookmark = chapterUpdate.bookmark,
+            lastPosition = chapterUpdate.lastPosition,
+            chapterNumber = chapterUpdate.chapterNumber,
+            sourceOrder = chapterUpdate.sourceOrder,
+            dateFetch = chapterUpdate.dateFetch,
+            dateUpload = chapterUpdate.dateUpload,
+            chapterId = chapterUpdate.id,
+        )
     }
 
     override suspend fun getChapterByNovelId(novelId: Long): List<NovelChapter> {
@@ -102,11 +103,7 @@ class NovelChapterRepositoryImpl(
     }
 
     override suspend fun upsertHistory(chapterId: Long, readAt: Date, sessionReadDuration: Long) {
-        try {
-            handler.await { novelhistoryQueries.upsert(chapterId, readAt, sessionReadDuration) }
-        } catch (e: Exception) {
-            logcat(LogPriority.ERROR, e)
-        }
+        handler.await { novelhistoryQueries.upsert(chapterId, readAt, sessionReadDuration) }
     }
 
     override fun getRecentHistoryAsFlow(): Flow<List<NovelHistoryItem>> {

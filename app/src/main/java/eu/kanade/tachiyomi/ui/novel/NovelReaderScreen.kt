@@ -42,6 +42,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -82,6 +83,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tachiyomi.i18n.MR
@@ -309,6 +311,7 @@ class NovelReaderScreen(
 
     private companion object {
         const val SAVE_POSITION_DEBOUNCE_MS = 500L
+        const val NO_POSITION = -1
         const val PAGE_SCROLL_FRACTION = 0.85f
         val PARAGRAPH_GAP = 16.dp
     }
@@ -330,11 +333,20 @@ class NovelReaderScreen(
                 listState.scrollToItem(state.savedParagraph.coerceAtMost(state.text.size))
             }
         }
+        val unsaved = remember { mutableIntStateOf(NO_POSITION) }
         LaunchedEffect(listState) {
             snapshotFlow { listState.firstVisibleItemIndex }
                 .drop(1)
+                .onEach { unsaved.intValue = it }
                 .debounce(SAVE_POSITION_DEBOUNCE_MS)
-                .collect(onPosition)
+                .collect {
+                    onPosition(it)
+                    unsaved.intValue = NO_POSITION
+                }
+        }
+        // Leaving within the debounce would drop the last scroll
+        DisposableEffect(listState) {
+            onDispose { unsaved.intValue.takeIf { it != NO_POSITION }?.let(onPosition) }
         }
         // The chapter counts as read once its end (the navigation row) scrolls into view.
         val reachedEnd by remember {
@@ -405,14 +417,21 @@ class NovelReaderScreen(
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
                 return@BoxWithConstraints
             }
+            val unsaved = remember { mutableIntStateOf(NO_POSITION) }
             LaunchedEffect(pagerState, pages) {
                 snapshotFlow { pagerState.currentPage }
                     .drop(1)
+                    .onEach { page -> pages.getOrNull(page)?.let { unsaved.intValue = it.firstParagraph } }
                     .debounce(SAVE_POSITION_DEBOUNCE_MS)
                     .collect { page ->
                         pages.getOrNull(page)?.let { onPosition(it.firstParagraph) }
+                        unsaved.intValue = NO_POSITION
                         if (pages.isNotEmpty() && page >= pages.lastIndex) onRead()
                     }
+            }
+            // Leaving within the debounce would drop the last page turn
+            DisposableEffect(pagerState) {
+                onDispose { unsaved.intValue.takeIf { it != NO_POSITION }?.let(onPosition) }
             }
             LaunchedEffect(speaking, pages) {
                 val index = speaking ?: return@LaunchedEffect

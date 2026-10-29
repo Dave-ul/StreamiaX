@@ -129,11 +129,11 @@ class JsNovelSource(
         var page = if (chapters.isEmpty()) 1 else 2
         val maxPages = totalPages ?: MAX_GUESSED_PAGES
         while (page <= maxPages) {
-            val got = runCatching {
-                JSON.decodeFromJsonElement<SourcePage>(
-                    rt.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())),
-                ).chapters
-            }.getOrDefault(emptyList())
+            // A failed page fails the whole list: a list cut short would make the sync delete the
+            // chapters after it, with their read state and history.
+            val got = JSON.decodeFromJsonElement<SourcePage>(
+                rt.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())),
+            ).chapters
             if (got.isEmpty()) break
             chapters += got
             if (totalPages == null && got.size < 5) break

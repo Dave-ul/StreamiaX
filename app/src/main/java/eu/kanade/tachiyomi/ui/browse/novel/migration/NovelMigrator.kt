@@ -33,16 +33,28 @@ class NovelMigrator(
         val target = loader.getOrInsert(targetSourceId, targetUrl, targetTitle)
         if (target.id == old.id) return
         val (_, newChapters) = loader.refresh(target)
+        // An empty list is a broken source far more often than a novel with no chapters.
+        check(newChapters.isNotEmpty()) { "$targetTitle has no chapters on the new source" }
 
-        val updates = planReadMigration(chapterRepository.getChapterByNovelId(old.id), newChapters)
-        if (updates.isNotEmpty()) chapterRepository.updateAll(updates)
-
+        // The writes are not one transaction (they span three repositories), so they run in the order
+        // that loses nothing if one fails: the target joins the library first, the old novel leaves last.
+        // At worst the novel is in the library twice.
         val categories = categoryRepository.getCategoriesByNovelId(old.id)
             .filterNot(Category::isSystemCategory)
             .map { it.id }
         novelRepository.setNovelCategories(target.id, categories)
-        novelRepository.updateNovel(NovelUpdate(id = target.id, favorite = true, dateAdded = old.dateAdded))
-        if (replace) novelRepository.updateNovel(NovelUpdate(id = old.id, favorite = false))
+        check(novelRepository.updateNovel(NovelUpdate(id = target.id, favorite = true, dateAdded = old.dateAdded))) {
+            "Could not add $targetTitle to the library"
+        }
+
+        val updates = planReadMigration(chapterRepository.getChapterByNovelId(old.id), newChapters)
+        if (updates.isNotEmpty()) chapterRepository.updateAll(updates)
+
+        if (replace) {
+            check(novelRepository.updateNovel(NovelUpdate(id = old.id, favorite = false))) {
+                "Could not remove ${old.title} from the library"
+            }
+        }
     }
 }
 

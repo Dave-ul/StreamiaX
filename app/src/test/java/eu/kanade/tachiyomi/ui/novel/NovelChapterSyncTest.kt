@@ -41,6 +41,33 @@ class NovelChapterSyncTest {
         assertEquals(ChapterSyncPlan(emptyList(), emptyList(), emptyList()), plan)
     }
 
+    @Test
+    fun `a chapter back under a new url keeps its read and bookmark state`() {
+        val known = listOf(
+            stored(1, "/old-1", "Chapter 1", 0, number = 1.0).copy(read = true, bookmark = true, dateFetch = 5),
+            stored(2, "/old-2", "Chapter 2", 1, number = 2.0),
+        )
+        val remote = listOf(remote("/new-1", "Chapter 1"), remote("/new-2", "Chapter 2"))
+
+        val plan = planChapterSync(novelId = 9, novelTitle = "Novel", remote = remote, known = known, now = 42)
+
+        assertEquals(
+            listOf(Triple("/new-1", true, true), Triple("/new-2", false, false)),
+            plan.toAdd.map { Triple(it.url, it.read, it.bookmark) },
+        )
+        assertEquals(5L, plan.toAdd.first().dateFetch)
+        assertEquals(listOf(1L, 2L), plan.toRemove)
+    }
+
+    @Test
+    fun `a url listed twice by the source is added once`() {
+        val remote = listOf(remote("/c1", "Chapter 1"), remote("/c1", "Chapter 1"))
+
+        val plan = planChapterSync(novelId = 9, novelTitle = "Novel", remote = remote, known = emptyList(), now = 0)
+
+        assertEquals(listOf("/c1"), plan.toAdd.map { it.url })
+    }
+
     private fun stored(id: Long, url: String, name: String, order: Long, number: Double = -1.0) =
         NovelChapter.create().copy(
             id = id,

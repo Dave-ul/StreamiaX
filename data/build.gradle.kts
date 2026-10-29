@@ -52,4 +52,9 @@ dependencies {
     implementation(kotlinx.serialization.protobuf)
 
     api(libs.bundles.sqldelight)
+
+    testImplementation(libs.bundles.test)
+    testImplementation(kotlinx.coroutines.test)
+    // In-memory SQLite on the JVM, to run the real queries and migrations in unit tests
+    testImplementation(libs.sqldelight.sqlite.driver)
 }

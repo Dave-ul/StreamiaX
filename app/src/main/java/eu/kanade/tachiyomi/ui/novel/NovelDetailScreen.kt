@@ -41,6 +41,8 @@ import eu.kanade.tachiyomi.ui.category.CategoriesTab
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -260,6 +262,7 @@ class NovelDetailScreenModel(
 
     private var novelId: Long = -1
     private var observingFavorite = false
+    private var loadJob: Job? = null
 
     init {
         load()
@@ -271,7 +274,9 @@ class NovelDetailScreenModel(
     }
 
     private fun load() {
-        screenModelScope.launch {
+        // A refresh replaces the load in progress rather than syncing the chapters twice.
+        loadJob?.cancel()
+        loadJob = screenModelScope.launch {
             runCatching {
                 val novel = loader.getOrInsert(sourceId, novelUrl, novelTitle)
                 novelId = novel.id
@@ -293,6 +298,8 @@ class NovelDetailScreenModel(
                     observeFavorite()
                 }
             }.onFailure { e ->
+                // A load replaced by a refresh must not overwrite the new one's state
+                if (e is CancellationException) throw e
                 _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
             }
         }

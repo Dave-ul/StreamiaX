@@ -1,0 +1,175 @@
+-- Novel database v1 -> v2: one row per novel and per chapter, enforced with unique indexes.
+--
+-- Modelled on Mihon's migrations/17.sqm. CREATE UNIQUE INDEX fails on any duplicate already stored, so
+-- duplicates are merged into one row first. Unlike Mihon, the tables are kept and only gain indexes.
+-- Only SQL that SQLite 3.28 runs is used (no UPDATE ... FROM): debug builds on API 30 use the system SQLite.
+-- Foreign keys are off while migrating (they are turned on in onOpen), so rows that depended on a
+-- discarded row are deleted explicitly.
+
+-- ---------------------------------------------------------------------------------------------------------
+-- orphans
+-- ---------------------------------------------------------------------------------------------------------
+
+DELETE FROM novel_chapters WHERE novel_id NOT IN (SELECT _id FROM novels);
+DELETE FROM novelhistory WHERE chapter_id NOT IN (SELECT _id FROM novel_chapters);
+DELETE FROM novels_categories
+WHERE novel_id NOT IN (SELECT _id FROM novels)
+OR category_id NOT IN (SELECT _id FROM categories);
+
+-- ---------------------------------------------------------------------------------------------------------
+-- novels
+-- ---------------------------------------------------------------------------------------------------------
+
+-- Copies of the same source entry: the one in the library is kept, else the oldest. It takes each
+-- detail it is missing from the oldest copy that has it, and everything attached to the others.
+CREATE TEMP TABLE duplicate_novels AS
+SELECT
+    _id,
+    first_value(_id) OVER (PARTITION BY source, url ORDER BY favorite DESC, _id ASC) AS keep_id
+FROM novels
+WHERE (source, url) IN (
+    SELECT source, url
+    FROM novels
+    GROUP BY source, url
+    HAVING count(*) > 1
+);
+
+UPDATE novels
+SET favorite = (
+        SELECT max(N.favorite) FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id
+    ),
+    -- The earliest time any copy joined the library
+    date_added = coalesce(
+        (
+            SELECT min(N.date_added) FROM novels N JOIN duplicate_novels D ON N._id = D._id
+            WHERE D.keep_id = novels._id AND N.favorite = 1
+        ),
+        date_added
+    ),
+    initialized = (
+        SELECT max(N.initialized) FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id
+    ),
+    last_update = (
+        SELECT max(N.last_update) FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id
+    ),
+    author = coalesce(author, (
+        SELECT N.author FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id AND N.author IS NOT NULL ORDER BY N._id LIMIT 1
+    )),
+    description = coalesce(description, (
+        SELECT N.description FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id AND N.description IS NOT NULL ORDER BY N._id LIMIT 1
+    )),
+    genre = coalesce(genre, (
+        SELECT N.genre FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id AND N.genre IS NOT NULL ORDER BY N._id LIMIT 1
+    )),
+    thumbnail_url = coalesce(thumbnail_url, (
+        SELECT N.thumbnail_url FROM novels N JOIN duplicate_novels D ON N._id = D._id
+        WHERE D.keep_id = novels._id AND N.thumbnail_url IS NOT NULL ORDER BY N._id LIMIT 1
+    ))
+WHERE _id IN (SELECT keep_id FROM duplicate_novels);
+
+UPDATE novel_chapters
+SET novel_id = (SELECT keep_id FROM duplicate_novels WHERE _id = novel_chapters.novel_id)
+WHERE novel_id IN (SELECT _id FROM duplicate_novels WHERE _id != keep_id);
+
+UPDATE novels_categories
+SET novel_id = (SELECT keep_id FROM duplicate_novels WHERE _id = novels_categories.novel_id)
+WHERE novel_id IN (SELECT _id FROM duplicate_novels WHERE _id != keep_id);
+
+DELETE FROM novels
+WHERE _id IN (SELECT _id FROM duplicate_novels WHERE _id != keep_id);
+
+DROP TABLE duplicate_novels;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- chapters
+-- ---------------------------------------------------------------------------------------------------------
+
+-- Moving the chapters above brings copies of the same chapter together, on top of the ones two
+-- concurrent refreshes could insert. The copy with reading history is kept, else the oldest, and the
+-- read state and history of the others are merged into it.
+CREATE TEMP TABLE duplicate_chapters AS
+SELECT
+    _id,
+    first_value(_id) OVER (PARTITION BY novel_id, url ORDER BY has_history DESC, _id ASC) AS keep_id
+FROM (
+    SELECT
+        _id,
+        novel_id,
+        url,
+        EXISTS(SELECT 1 FROM novelhistory H WHERE H.chapter_id = novel_chapters._id) AS has_history
+    FROM novel_chapters
+    WHERE (novel_id, url) IN (
+        SELECT novel_id, url
+        FROM novel_chapters
+        GROUP BY novel_id, url
+        HAVING count(*) > 1
+    )
+);
+
+UPDATE novel_chapters
+SET read = (
+        SELECT max(C.read) FROM novel_chapters C JOIN duplicate_chapters D ON C._id = D._id
+        WHERE D.keep_id = novel_chapters._id
+    ),
+    bookmark = (
+        SELECT max(C.bookmark) FROM novel_chapters C JOIN duplicate_chapters D ON C._id = D._id
+        WHERE D.keep_id = novel_chapters._id
+    ),
+    last_position = (
+        SELECT max(C.last_position) FROM novel_chapters C JOIN duplicate_chapters D ON C._id = D._id
+        WHERE D.keep_id = novel_chapters._id
+    ),
+    -- 0 means the fetch date was never recorded, so it only wins when no copy recorded one
+    date_fetch = (
+        SELECT coalesce(min(nullif(C.date_fetch, 0)), 0)
+        FROM novel_chapters C JOIN duplicate_chapters D ON C._id = D._id
+        WHERE D.keep_id = novel_chapters._id
+    )
+WHERE _id IN (SELECT keep_id FROM duplicate_chapters);
+
+-- The kept chapter has a history row whenever any copy has one. Each copy accumulated its own
+-- reading time, so the durations add up; the last-read time takes the latest.
+UPDATE novelhistory
+SET last_read = (
+        SELECT max(H.last_read) FROM novelhistory H JOIN duplicate_chapters D ON H.chapter_id = D._id
+        WHERE D.keep_id = novelhistory.chapter_id
+    ),
+    time_read = (
+        SELECT sum(H.time_read) FROM novelhistory H JOIN duplicate_chapters D ON H.chapter_id = D._id
+        WHERE D.keep_id = novelhistory.chapter_id
+    )
+WHERE chapter_id IN (SELECT keep_id FROM duplicate_chapters);
+
+DELETE FROM novelhistory
+WHERE chapter_id IN (SELECT _id FROM duplicate_chapters WHERE _id != keep_id);
+
+DELETE FROM novel_chapters
+WHERE _id IN (SELECT _id FROM duplicate_chapters WHERE _id != keep_id);
+
+DROP TABLE duplicate_chapters;
+
+-- ---------------------------------------------------------------------------------------------------------
+-- categories
+-- ---------------------------------------------------------------------------------------------------------
+
+-- Moving the novels above can put a novel in the same category twice
+DELETE FROM novels_categories
+WHERE _id NOT IN (
+    SELECT min(_id)
+    FROM novels_categories
+    GROUP BY novel_id, category_id
+);
+
+-- ---------------------------------------------------------------------------------------------------------
+-- indexes, as declared in the .sq files
+-- ---------------------------------------------------------------------------------------------------------
+
+CREATE UNIQUE INDEX novels_source_url_unique ON novels(source, url);
+CREATE UNIQUE INDEX novel_chapters_novel_url_unique ON novel_chapters(novel_id, url);
+CREATE UNIQUE INDEX novels_categories_unique ON novels_categories(novel_id, category_id);

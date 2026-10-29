@@ -12,7 +12,6 @@ import eu.kanade.tachiyomi.ui.novel.reader.NovelTranslator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +21,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.entries.novel.repository.NovelRepository
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
@@ -79,6 +79,8 @@ class NovelReaderScreenModel(
                     },
                 )
                 val paragraphs = withContext(Dispatchers.Default) { htmlToParagraphs(html) }
+                // A blank chapter is a broken page: shown as an error, so it is never marked read.
+                check(paragraphs.isNotEmpty()) { "${source.name} returned no text for ${chapter.name}" }
                 val siblings = chapterRepository.getChapterByNovelId(chapter.novelId).sortedBy { it.sourceOrder }
                 val index = siblings.indexOfFirst { it.id == chapterId }
                 _state.update {
@@ -95,6 +97,7 @@ class NovelReaderScreenModel(
                 // Shows up in History right away; the reading time is added when leaving.
                 chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = 0)
             }.onFailure { e ->
+                if (e is CancellationException) throw e
                 _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
                 return@launch
             }
@@ -188,11 +191,20 @@ class NovelReaderScreenModel(
     @OptIn(DelicateCoroutinesApi::class)
     override fun onDispose() {
         speech.shutdown()
-        if (_state.value.loading || _state.value.error != null) return
+        val state = _state.value
+        if (state.loading || state.error != null) return
         val duration = System.currentTimeMillis() - openedAt
-        // screenModelScope is being cancelled, so the last write goes through a global scope.
-        GlobalScope.launch(Dispatchers.IO) {
-            chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = duration)
+        // screenModelScope is being cancelled, so the last writes go through the app scope. The
+        // position is written again here because a save launched while leaving can be cancelled.
+        launchIO {
+            try {
+                chapterRepository.update(
+                    NovelChapterUpdate(id = chapterId, lastPosition = state.savedParagraph.toLong()),
+                )
+                chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = duration)
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Could not save reading progress of chapter $chapterId" }
+            }
         }
     }
 

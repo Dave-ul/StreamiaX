@@ -8,13 +8,20 @@ import java.util.Date
 
 interface NovelChapterRepository {
 
-    suspend fun addAll(chapters: List<NovelChapter>): List<NovelChapter>
+    /**
+     * Applies a sync with the source in one transaction, as Mihon's `ChapterRepository.updateFromRemote`:
+     * either the whole chapter list changes or nothing does. Chapters in [added] whose url the novel
+     * already has are skipped. Returns the inserted chapters with their ids.
+     */
+    suspend fun updateFromRemote(
+        removedIds: List<Long>,
+        added: List<NovelChapter>,
+        updated: List<NovelChapterUpdate>,
+    ): List<NovelChapter>
 
     suspend fun update(chapterUpdate: NovelChapterUpdate)
 
     suspend fun updateAll(chapterUpdates: List<NovelChapterUpdate>)
-
-    suspend fun removeChaptersWithIds(chapterIds: List<Long>)
 
     suspend fun getChapterByNovelId(novelId: Long): List<NovelChapter>
 
