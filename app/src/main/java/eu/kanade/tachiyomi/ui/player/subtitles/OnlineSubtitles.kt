@@ -52,8 +52,11 @@ class OnlineSubtitles(
     ) {
         /** Same video and position in the show: a reopened sheet can keep its results. */
         fun sameVideoAs(other: Query): Boolean =
-            localVideo == other.localVideo && imdbId == other.imdbId &&
-                season == other.season && episode == other.episode && movie == other.movie
+            localVideo == other.localVideo &&
+                imdbId == other.imdbId &&
+                season == other.season &&
+                episode == other.episode &&
+                movie == other.movie
     }
 
     enum class Provider(val label: String, val headers: Headers, val gzipped: Boolean) {

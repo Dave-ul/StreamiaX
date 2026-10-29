@@ -69,13 +69,14 @@ class GlobalNovelSearchScreen(
         val screenModel = rememberScreenModel { GlobalNovelSearchScreenModel(initialQuery, migrateFromNovelId) }
         val state by screenModel.state.collectAsState()
         var pending by remember { mutableStateOf<Pair<NovelSource, SNovel>?>(null) }
+        val titleRes = if (migrateFromNovelId != null) MR.strings.action_migrate else MR.strings.action_global_search
 
         Scaffold(
             topBar = {
                 SearchToolbar(
                     titleContent = {
                         Text(
-                            stringResource(if (migrateFromNovelId != null) MR.strings.action_migrate else MR.strings.action_global_search),
+                            stringResource(titleRes),
                         )
                     },
                     searchQuery = state.query,

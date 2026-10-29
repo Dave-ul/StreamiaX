@@ -141,9 +141,13 @@ class JsNovelRuntime(pluginId: String, code: String) : Closeable {
         val body: RequestBody? = when {
             method == "GET" || method == "HEAD" -> null
             form != null -> MultipartBody.Builder().setType(MultipartBody.FORM).apply {
-                form.forEach { addFormDataPart(it.jsonArray[0].jsonPrimitive.content, it.jsonArray[1].jsonPrimitive.content) }
+                form.forEach {
+                    addFormDataPart(it.jsonArray[0].jsonPrimitive.content, it.jsonArray[1].jsonPrimitive.content)
+                }
             }.build()
-            else -> (req["body"]?.jsonPrimitive?.content ?: "").toRequestBody(headers["content-type"]?.toMediaTypeOrNull())
+            else -> (req["body"]?.jsonPrimitive?.content ?: "").toRequestBody(
+                headers["content-type"]?.toMediaTypeOrNull(),
+            )
         }
 
         val request = Request.Builder()

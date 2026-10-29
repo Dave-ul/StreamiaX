@@ -42,7 +42,14 @@ class NovelChapterSyncTest {
     }
 
     private fun stored(id: Long, url: String, name: String, order: Long, number: Double = -1.0) =
-        NovelChapter.create().copy(id = id, novelId = 9, url = url, name = name, sourceOrder = order, chapterNumber = number)
+        NovelChapter.create().copy(
+            id = id,
+            novelId = 9,
+            url = url,
+            name = name,
+            sourceOrder = order,
+            chapterNumber = number,
+        )
 
     private fun remote(url: String, name: String) = SNovelChapter.create().also {
         it.url = url
