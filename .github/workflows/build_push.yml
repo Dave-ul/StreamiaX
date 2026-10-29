@@ -1,7 +1,7 @@
 name: CI
 
 permissions:
-  contents: write
+  contents: read
 
 on:
   push:
@@ -10,8 +10,8 @@ on:
     tags:
       - v*
   pull_request:
-    branches:
-      - main
+  # Beta branches that are not a PR (e.g. two PRs merged together for testing)
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,48 +24,95 @@ jobs:
 
     steps:
       - name: Clone repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
 
       - name: Set up JDK
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12 # v4.7.0
         with:
           java-version: 17
           distribution: temurin
 
       - name: Set up gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@94baf225fe0a508e581a564467443d0e2379123b # v4.3.0
 
-      - name: Build APK
-        run: ./gradlew assembleRelease
+      # Same as spotlessCheck, but a failure leaves the fix as an artifact
+      # (`gh run download -n spotless-patch`, then `git apply spotless.patch`).
+      - name: Check code format
+        run: |
+          ./gradlew spotlessApply
+          if ! git diff --quiet; then
+            git diff > spotless.patch
+            git diff --stat
+            echo "::error::Code format violations: apply the spotless-patch artifact"
+            exit 1
+          fi
+
+      - name: Upload format fix
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: spotless-patch
+          path: spotless.patch
+          if-no-files-found: ignore
 
       - name: Run unit tests
         run: ./gradlew testReleaseUnitTest
 
+      # On tags the version name comes from the tag (v0.2.0-beta6 -> 0.2.0-beta6).
+      # versionCode stays Aniyomi's: the app migrations are keyed on it.
+      - name: Build APK
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            ./gradlew assembleRelease -PstreamiaxVersion="${GITHUB_REF_NAME#v}"
+          else
+            ./gradlew assembleRelease
+          fi
+
       - name: Upload arm64-v8a APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: arm64-v8a-${{ github.sha }}
           path: app/build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+          if-no-files-found: error
 
       - name: Upload universal APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: universal-${{ github.sha }}
           path: app/build/outputs/apk/release/app-universal-release-unsigned.apk
+          if-no-files-found: error
 
-      # Sign APKs and create release on tags
-
-      - name: Get tag name
+      - name: Upload all APKs for the release
         if: startsWith(github.ref, 'refs/tags/v')
-        run: echo "VERSION_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-apks
+          path: app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
+          retention-days: 1
+
+  # Sign APKs and create the release on tags. Only this job can write to the repo.
+  release:
+    name: Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download APKs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-apks
+          path: apk
 
       - name: Sign APKs
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: r0adkll/sign-android-release@f30bdd30588842ac76044ecdbd4b6d0e3e813478
         with:
-          releaseDirectory: app/build/outputs/apk/release
+          releaseDirectory: apk
           signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
           alias: ${{ secrets.KEY_ALIAS }}
           keyStorePassword: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -73,42 +120,49 @@ jobs:
         env:
           BUILD_TOOLS_VERSION: '35.0.1'
 
-      - name: Rename signed APKs
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Rename signed APKs and compute checksums
         run: |
           set -e
-          cd app/build/outputs/apk/release
+          apksigner="$ANDROID_HOME/build-tools/35.0.1/apksigner"
+          # Every ABI must be there and signed: a partial release must not go out.
           for abi in universal arm64-v8a armeabi-v7a x86 x86_64; do
-            src="app-${abi}-release-unsigned-signed.apk"
-            if [ -f "$src" ]; then
-              mv "$src" "$GITHUB_WORKSPACE/streamiax-${abi}-${VERSION_TAG}.apk"
-            fi
+            dst="streamiax-${abi}-${GITHUB_REF_NAME}.apk"
+            mv "apk/app-${abi}-release-unsigned-signed.apk" "$dst"
+            "$apksigner" verify "$dst"
           done
+          {
+            echo 'SHA256<<EOF'
+            sha256sum streamiax-*.apk
+            echo 'EOF'
+          } >> "$GITHUB_ENV"
 
+      # A tag with a suffix (v0.2.0-beta6) is a pre-release and never becomes "Latest".
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda # v2.2.1
         with:
-          tag_name: ${{ env.VERSION_TAG }}
-          name: StreamiaX ${{ env.VERSION_TAG }}
+          tag_name: ${{ github.ref_name }}
+          name: StreamiaX ${{ github.ref_name }}
           body: |
-            ## StreamiaX ${{ env.VERSION_TAG }}
+            ## StreamiaX ${{ github.ref_name }}
 
             Based on [Aniyomi](https://github.com/aniyomiorg/aniyomi) with integrated
             Stremio streaming add-ons and lnreader-style novel sources.
 
             ### Download
-            Use **streamiax-universal-${{ env.VERSION_TAG }}.apk** if unsure which to pick.
+            Use **streamiax-universal-${{ github.ref_name }}.apk** if unsure which to pick.
             For smaller downloads choose your device ABI (most modern phones: arm64-v8a).
 
             Requires Android 8.0+.
-          files: |
-            streamiax-universal-${{ env.VERSION_TAG }}.apk
-            streamiax-arm64-v8a-${{ env.VERSION_TAG }}.apk
-            streamiax-armeabi-v7a-${{ env.VERSION_TAG }}.apk
-            streamiax-x86-${{ env.VERSION_TAG }}.apk
-            streamiax-x86_64-${{ env.VERSION_TAG }}.apk
+
+            ### Checksums
+            ```
+            ${{ env.SHA256 }}
+            ```
+          generate_release_notes: true
+          files: streamiax-*.apk
+          fail_on_unmatched_files: true
           draft: false
-          prerelease: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

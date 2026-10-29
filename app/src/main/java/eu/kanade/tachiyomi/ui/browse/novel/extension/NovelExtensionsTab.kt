@@ -53,7 +53,10 @@ fun novelExtensionsTab(screenModel: NovelExtensionsScreenModel): TabContent {
             val query = state.query.orEmpty()
             val latest = state.available.associateBy { it.id }
             val installed = installedPlugins.filter { it.plugin.matches(query) }.sortedBy { it.name.lowercase() }
-            val updates = installed.filter { source -> latest[source.plugin.id]?.version.let { it != null && it != source.plugin.version } }
+            val updates = installed.filter { source ->
+                val latestVersion = latest[source.plugin.id]?.version
+                latestVersion != null && latestVersion != source.plugin.version
+            }
             val installedIds = installedPlugins.mapTo(HashSet()) { it.plugin.id }
             val available = state.available
                 .filter { it.id !in installedIds && it.matches(query) }
@@ -78,7 +81,9 @@ fun novelExtensionsTab(screenModel: NovelExtensionsScreenModel): TabContent {
                             if (update.id in state.busy) {
                                 Busy()
                             } else {
-                                TextButton(onClick = { screenModel.install(update) }) { Text(stringResource(MR.strings.ext_update)) }
+                                TextButton(onClick = {
+                                    screenModel.install(update)
+                                }) { Text(stringResource(MR.strings.ext_update)) }
                             }
                         }
                     }
@@ -102,7 +107,9 @@ fun novelExtensionsTab(screenModel: NovelExtensionsScreenModel): TabContent {
                     state.indexError != null -> item(key = "index-error") {
                         Column(Modifier.padding(16.dp)) {
                             Text(state.indexError!!, color = MaterialTheme.colorScheme.error)
-                            TextButton(onClick = screenModel::loadIndex) { Text(stringResource(MR.strings.action_retry)) }
+                            TextButton(onClick = screenModel::loadIndex) {
+                                Text(stringResource(MR.strings.action_retry))
+                            }
                         }
                     }
                     else -> available.forEach { (lang, plugins) ->
@@ -179,7 +186,9 @@ class NovelExtensionsScreenModel(
         _state.update { it.copy(busy = it.busy + plugin.id, message = null) }
         screenModelScope.launch {
             runCatching { sourceManager.installPlugin(plugin) }
-                .onFailure { e -> _state.update { it.copy(message = "${plugin.name}: ${e.message ?: "install failed"}") } }
+                .onFailure { e ->
+                    _state.update { it.copy(message = "${plugin.name}: ${e.message ?: "install failed"}") }
+                }
             _state.update { it.copy(busy = it.busy - plugin.id) }
         }
     }

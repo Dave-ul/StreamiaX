@@ -19,8 +19,9 @@ android {
     defaultConfig {
         applicationId = "com.streamiax.app"
 
+        // Keep Aniyomi's versionCode: app migrations run by it. CI sets the name from the tag.
         versionCode = 132
-        versionName = "0.18.2.1-streamiax"
+        versionName = providers.gradleProperty("streamiaxVersion").getOrElse("0.2.0-dev")
 
         buildConfigField("String", "COMMIT_COUNT", "\"${getCommitCount()}\"")
         buildConfigField("String", "COMMIT_SHA", "\"${getGitSha()}\"")

@@ -70,10 +70,14 @@ fun Screen.novelSourcesTab(): TabContent {
                                 onClick = { navigator.push(NovelCatalogScreen(source.id)) },
                                 action = {
                                     if (source.supportsLatest) {
-                                        TextButton(onClick = { navigator.push(NovelCatalogScreen(source.id, latest = true)) }) {
+                                        TextButton(onClick = {
+                                            navigator.push(NovelCatalogScreen(source.id, latest = true))
+                                        }) {
                                             Text(
                                                 text = stringResource(MR.strings.latest),
-                                                style = LocalTextStyle.current.copy(color = MaterialTheme.colorScheme.primary),
+                                                style = LocalTextStyle.current.copy(
+                                                    color = MaterialTheme.colorScheme.primary,
+                                                ),
                                             )
                                         }
                                     }

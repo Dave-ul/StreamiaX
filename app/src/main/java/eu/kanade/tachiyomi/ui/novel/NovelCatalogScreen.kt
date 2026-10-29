@@ -122,13 +122,19 @@ class NovelCatalogScreen(
                 ) {
                     FilterChip(
                         selected = state.listing == Listing.Popular,
-                        onClick = { query = ""; screenModel.setListing(Listing.Popular) },
+                        onClick = {
+                            query = ""
+                            screenModel.setListing(Listing.Popular)
+                        },
                         label = { Text(stringResource(MR.strings.popular)) },
                     )
                     if (state.supportsLatest) {
                         FilterChip(
                             selected = state.listing == Listing.Latest,
-                            onClick = { query = ""; screenModel.setListing(Listing.Latest) },
+                            onClick = {
+                                query = ""
+                                screenModel.setListing(Listing.Latest)
+                            },
                             label = { Text(stringResource(MR.strings.latest)) },
                         )
                     }
