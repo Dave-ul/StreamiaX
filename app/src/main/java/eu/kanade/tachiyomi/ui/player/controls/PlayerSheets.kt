@@ -31,10 +31,13 @@ import eu.kanade.tachiyomi.ui.player.controls.components.sheets.AudioTracksSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.ChaptersSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.HosterState
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.MoreSheet
+import eu.kanade.tachiyomi.ui.player.controls.components.sheets.OnlineSubtitlesSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.PlaybackSpeedSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.QualitySheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.ScreenshotSheet
 import eu.kanade.tachiyomi.ui.player.controls.components.sheets.SubtitlesSheet
+import eu.kanade.tachiyomi.ui.player.subtitles.OnlineSubtitles
+import eu.kanade.tachiyomi.ui.player.subtitles.OnlineSubtitlesController
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.toImmutableList
 import tachiyomi.domain.custombuttons.model.CustomButton
@@ -49,6 +52,12 @@ fun PlayerSheets(
     selectedSubtitles: ImmutableList<Int>,
     onAddSubtitle: (Uri) -> Unit,
     onSelectSubtitle: (Int) -> Unit,
+    onSearchOnlineSubtitles: () -> Unit,
+
+    // online subtitles sheet
+    onlineSubtitles: OnlineSubtitlesController.State,
+    onSearchSubtitles: (String, String) -> Unit,
+    onAddOnlineSubtitle: (OnlineSubtitles.Result) -> Unit,
 
     // audio sheet
     audioTracks: ImmutableList<VideoTrack>,
@@ -112,8 +121,18 @@ fun PlayerSheets(
                 selectedTracks = selectedSubtitles,
                 onSelect = onSelectSubtitle,
                 onAddSubtitle = { subtitlesPicker.launch(arrayOf("*/*")) },
+                onSearchOnline = onSearchOnlineSubtitles,
                 onOpenSubtitleSettings = { onOpenPanel(Panels.SubtitleSettings) },
                 onOpenSubtitleDelay = { onOpenPanel(Panels.SubtitleDelay) },
+                onDismissRequest = onDismissRequest,
+            )
+        }
+
+        Sheets.OnlineSubtitles -> {
+            OnlineSubtitlesSheet(
+                state = onlineSubtitles,
+                onSearch = onSearchSubtitles,
+                onAdd = onAddOnlineSubtitle,
                 onDismissRequest = onDismissRequest,
             )
         }
