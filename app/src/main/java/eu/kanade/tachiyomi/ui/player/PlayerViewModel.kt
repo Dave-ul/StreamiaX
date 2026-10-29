@@ -345,7 +345,7 @@ class PlayerViewModel @JvmOverloads constructor(
                 language = OnlineSubtitles.defaultLanguage(subtitlePreferences.preferredSubLanguages().get()),
                 season = stremioIds?.getOrNull(1)?.toIntOrNull() ?: OnlineSubtitles.seasonFromTitle(anime.title),
                 episode = stremioIds?.getOrNull(2)?.toIntOrNull()
-                    ?: episode?.episodeNumber?.takeIf { it > 0 }?.toInt(),
+                    ?: episode?.episode_number?.takeIf { it > 0 }?.toInt(),
                 movie = stremio?.firstOrNull() == "movie",
                 imdbId = stremioIds?.firstOrNull()?.takeIf { it.startsWith("tt") },
                 localVideo = currentVideo.value?.videoUrl,
