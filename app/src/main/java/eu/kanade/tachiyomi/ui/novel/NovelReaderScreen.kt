@@ -1,112 +1,174 @@
 package eu.kanade.tachiyomi.ui.novel
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.animateScrollBy
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material.icons.outlined.FormatSize
+import androidx.compose.material.icons.outlined.Stop
+import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.text.HtmlCompat
-import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
-import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
-import eu.kanade.tachiyomi.source.novel.NovelSourceManager
+import eu.kanade.tachiyomi.ui.novel.reader.NovelPage
+import eu.kanade.tachiyomi.ui.novel.reader.NovelReaderPreferences
+import eu.kanade.tachiyomi.ui.novel.reader.NovelReaderSettingsSheet
+import eu.kanade.tachiyomi.ui.novel.reader.ReaderFont
+import eu.kanade.tachiyomi.ui.novel.reader.pageOfParagraph
+import eu.kanade.tachiyomi.ui.novel.reader.paginate
 import kotlinx.collections.immutable.persistentListOf
-import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import tachiyomi.core.common.preference.PreferenceStore
-import tachiyomi.domain.entries.novel.repository.NovelRepository
-import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
-import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
-import tachiyomi.presentation.core.util.collectAsState
-import uy.kohesive.injekt.Injekt
-import uy.kohesive.injekt.api.get
-import java.util.Date
+import tachiyomi.presentation.core.util.collectAsState as collectPreferenceAsState
 
+/**
+ * Novel chapter reader: scrolling or paged text, reader themes, text-to-speech and
+ * translation. Features follow lnreader and QuickNovel; the paged mode and translation
+ * flow follow Dartotsu. Defaults are described in [NovelReaderPreferences].
+ *
+ * @param autoSpeak start reading aloud as soon as the chapter loads (speech continuing
+ * from the previous chapter).
+ */
 class NovelReaderScreen(
     private val chapterId: Long,
+    private val autoSpeak: Boolean = false,
 ) : Screen() {
 
-    @OptIn(ExperimentalMaterial3Api::class)
+    @OptIn(ExperimentalFoundationApi::class)
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { NovelReaderScreenModel(chapterId) }
+        val screenModel = rememberScreenModel { NovelReaderScreenModel(chapterId, autoSpeak) }
         val state by screenModel.state.collectAsState()
-        val listState = rememberLazyListState()
-        val preferences = remember { Injekt.get<PreferenceStore>() }
-        val fontSizePref = remember { preferences.getInt("novel_reader_font_size", 18) }
-        val lineHeightPref = remember { preferences.getFloat("novel_reader_line_height", 1.5f) }
-        val fontSize by fontSizePref.collectAsState()
-        val lineHeight by lineHeightPref.collectAsState()
+        val speaking by screenModel.speaking.collectAsState()
+        val prefs = screenModel.preferences
+        val fontSize by prefs.fontSize().collectPreferenceAsState()
+        val lineHeight by prefs.lineHeight().collectPreferenceAsState()
+        val sidePadding by prefs.sidePadding().collectPreferenceAsState()
+        val justify by prefs.justify().collectPreferenceAsState()
+        val font by prefs.font().collectPreferenceAsState()
+        val theme by prefs.theme().collectPreferenceAsState()
+        val paged by prefs.pagedMode().collectPreferenceAsState()
+        val volumeKeys by prefs.volumeKeys().collectPreferenceAsState()
+        val keepScreenOn by prefs.keepScreenOn().collectPreferenceAsState()
+        val translate by prefs.translate().collectPreferenceAsState()
         var showSettings by remember { mutableStateOf(false) }
 
-        // Restore the saved paragraph once the text is loaded, then persist further scrolling.
-        LaunchedEffect(state.loading) {
-            if (!state.loading && state.startParagraph > 0) {
-                listState.scrollToItem(state.startParagraph.coerceAtMost(state.paragraphs.size))
+        val background = theme.background?.let { Color(it) } ?: MaterialTheme.colorScheme.background
+        val textColor = theme.text?.let { Color(it) } ?: MaterialTheme.colorScheme.onBackground
+        val style = MaterialTheme.typography.bodyLarge.copy(
+            fontSize = fontSize.sp,
+            lineHeight = (fontSize * lineHeight).sp,
+            fontFamily = font.toFontFamily(),
+            textAlign = if (justify) TextAlign.Justify else TextAlign.Start,
+            color = textColor,
+        )
+
+        // Speech reached the end of the chapter: open the next one and keep reading.
+        LaunchedEffect(screenModel) {
+            screenModel.speakNext.collect { navigator.replace(NovelReaderScreen(it, autoSpeak = true)) }
+        }
+
+        val view = LocalView.current
+        DisposableEffect(keepScreenOn, speaking) {
+            view.keepScreenOn = keepScreenOn || speaking != null
+            onDispose { view.keepScreenOn = false }
+        }
+
+        val listState = rememberLazyListState()
+        // Null until paginated. One extra page holds the chapter navigation, like the last row
+        // of the scrolling reader.
+        var pages by remember { mutableStateOf<List<NovelPage>?>(null) }
+        val pagerState = rememberPagerState { (pages?.size ?: 0) + 1 }
+        val scope = rememberCoroutineScope()
+        val focusRequester = remember { FocusRequester() }
+
+        fun currentParagraph(): Int = if (paged) {
+            pages?.let { it.getOrNull(pagerState.currentPage)?.firstParagraph ?: state.text.lastIndex }
+                ?: state.savedParagraph
+        } else {
+            listState.firstVisibleItemIndex.coerceAtMost(state.text.lastIndex)
+        }
+
+        fun turn(forward: Boolean) {
+            scope.launch {
+                if (paged) {
+                    val target = pagerState.currentPage + if (forward) 1 else -1
+                    pagerState.animateScrollToPage(target.coerceIn(0, pagerState.pageCount - 1))
+                } else {
+                    val viewport = listState.layoutInfo.viewportSize.height * PAGE_SCROLL_FRACTION
+                    listState.animateScrollBy(if (forward) viewport else -viewport)
+                }
             }
-        }
-        LaunchedEffect(listState) {
-            snapshotFlow { listState.firstVisibleItemIndex }
-                .drop(1)
-                .debounce(SAVE_POSITION_DEBOUNCE_MS)
-                .collect(screenModel::savePosition)
-        }
-        // The chapter counts as read once its end (the navigation row) scrolls into view.
-        val reachedEnd by remember {
-            derivedStateOf {
-                val info = listState.layoutInfo
-                info.totalItemsCount > 0 && info.visibleItemsInfo.lastOrNull()?.index == info.totalItemsCount - 1
-            }
-        }
-        LaunchedEffect(reachedEnd, state.loading) {
-            if (reachedEnd && !state.loading && state.error == null) screenModel.markRead()
         }
 
         Scaffold(
@@ -117,6 +179,30 @@ class NovelReaderScreen(
                     actions = {
                         AppBarActions(
                             persistentListOf(
+                                if (speaking == null) {
+                                    AppBar.Action(
+                                        title = stringResource(AYMR.strings.novel_reader_speak),
+                                        icon = Icons.AutoMirrored.Outlined.VolumeUp,
+                                        onClick = { screenModel.startSpeech(currentParagraph()) },
+                                    )
+                                } else {
+                                    AppBar.Action(
+                                        title = stringResource(AYMR.strings.novel_reader_stop_speaking),
+                                        icon = Icons.Outlined.Stop,
+                                        onClick = screenModel::stopSpeech,
+                                    )
+                                },
+                                AppBar.Action(
+                                    title = stringResource(
+                                        if (translate) {
+                                            AYMR.strings.novel_reader_show_original
+                                        } else {
+                                            AYMR.strings.novel_reader_translate
+                                        },
+                                    ),
+                                    icon = Icons.Outlined.Translate,
+                                    onClick = { screenModel.setTranslation(!translate) },
+                                ),
                                 AppBar.Action(
                                     title = stringResource(AYMR.strings.novel_reader_text_settings),
                                     icon = Icons.Outlined.FormatSize,
@@ -128,172 +214,294 @@ class NovelReaderScreen(
                 )
             },
         ) { contentPadding ->
-            when {
-                state.loading -> Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(contentPadding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator()
-                }
-                state.error != null -> Box(
-                    Modifier
-                        .fillMaxSize()
-                        .padding(contentPadding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(state.error!!, modifier = Modifier.padding(16.dp))
-                }
-                else -> SelectionContainer {
-                    LazyColumn(state = listState, contentPadding = contentPadding) {
-                        itemsIndexed(state.paragraphs) { _, paragraph ->
-                            Text(
-                                text = paragraph,
-                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
-                                style = MaterialTheme.typography.bodyLarge.copy(
-                                    fontSize = fontSize.sp,
-                                    lineHeight = (fontSize * lineHeight).sp,
-                                ),
-                            )
-                        }
-                        item {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                            ) {
-                                TextButton(
-                                    enabled = state.previousChapterId != null,
-                                    onClick = { navigator.replace(NovelReaderScreen(state.previousChapterId!!)) },
-                                ) { Text(stringResource(MR.strings.action_previous_chapter)) }
-                                TextButton(
-                                    enabled = state.nextChapterId != null,
-                                    onClick = { navigator.replace(NovelReaderScreen(state.nextChapterId!!)) },
-                                ) { Text(stringResource(MR.strings.action_next_chapter)) }
-                            }
-                        }
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .background(background)
+                    .padding(contentPadding)
+                    .focusRequester(focusRequester)
+                    .focusable()
+                    .onPreviewKeyEvent { event ->
+                        val isVolume = event.key == Key.VolumeDown || event.key == Key.VolumeUp
+                        if (!volumeKeys || !isVolume) return@onPreviewKeyEvent false
+                        if (event.type == KeyEventType.KeyDown) turn(forward = event.key == Key.VolumeDown)
+                        true
+                    },
+            ) {
+                CompositionLocalProvider(LocalContentColor provides textColor) {
+                    when {
+                        state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
+                        state.error != null -> Text(
+                            text = state.error.orEmpty(),
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .padding(16.dp),
+                        )
+                        paged -> PagedText(
+                            state = state,
+                            style = style,
+                            sidePadding = sidePadding,
+                            speaking = speaking,
+                            pagerState = pagerState,
+                            pages = pages,
+                            onPagesChange = { pages = it },
+                            onTurn = ::turn,
+                            onPosition = screenModel::savePosition,
+                            onRead = screenModel::markRead,
+                            onChapter = { navigator.replace(NovelReaderScreen(it)) },
+                        )
+                        else -> ScrollingText(
+                            state = state,
+                            style = style,
+                            sidePadding = sidePadding,
+                            speaking = speaking,
+                            listState = listState,
+                            onPosition = screenModel::savePosition,
+                            onRead = screenModel::markRead,
+                            onChapter = { navigator.replace(NovelReaderScreen(it)) },
+                        )
+                    }
+                    if (state.translating) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+                    }
+                    if (state.speechUnavailable) {
+                        Text(
+                            text = stringResource(AYMR.strings.novel_reader_speech_unavailable),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.errorContainer)
+                                .padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                    state.translationError?.let {
+                        Text(
+                            text = stringResource(AYMR.strings.novel_reader_translation_failed, it),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.errorContainer)
+                                .padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
                     }
                 }
             }
         }
 
+        LaunchedEffect(state.loading) {
+            if (!state.loading) focusRequester.requestFocus()
+        }
+
         if (showSettings) {
-            ModalBottomSheet(onDismissRequest = { showSettings = false }) {
-                Column(Modifier.padding(start = 24.dp, end = 24.dp, bottom = 32.dp)) {
-                    Text("${stringResource(AYMR.strings.novel_reader_font_size)}: $fontSize")
-                    Slider(
-                        value = fontSize.toFloat(),
-                        onValueChange = { fontSizePref.set(it.toInt()) },
-                        valueRange = 12f..32f,
-                        steps = 19,
-                    )
-                    Text("${stringResource(AYMR.strings.novel_reader_line_height)}: ${"%.1f".format(lineHeight)}")
-                    Slider(
-                        value = lineHeight,
-                        onValueChange = { lineHeightPref.set((it * 10).toInt() / 10f) },
-                        valueRange = 1.0f..2.4f,
-                        steps = 13,
-                    )
-                }
-            }
+            NovelReaderSettingsSheet(
+                preferences = prefs,
+                translationTarget = screenModel.translationTarget(),
+                onTranslationLanguage = screenModel::setTranslationLanguage,
+                onDismissRequest = {
+                    showSettings = false
+                    focusRequester.requestFocus()
+                },
+            )
         }
     }
 
     private companion object {
         const val SAVE_POSITION_DEBOUNCE_MS = 500L
-    }
-}
-
-class NovelReaderScreenModel(
-    private val chapterId: Long,
-    private val sourceManager: NovelSourceManager = Injekt.get(),
-    private val novelRepository: NovelRepository = Injekt.get(),
-    private val chapterRepository: NovelChapterRepository = Injekt.get(),
-) : ScreenModel {
-
-    private val _state = MutableStateFlow(State())
-    val state = _state.asStateFlow()
-
-    private val openedAt = System.currentTimeMillis()
-
-    init {
-        load()
+        const val PAGE_SCROLL_FRACTION = 0.85f
+        val PARAGRAPH_GAP = 16.dp
     }
 
-    private fun load() {
-        screenModelScope.launch {
-            runCatching {
-                val chapter = chapterRepository.getChapterById(chapterId)
-                    ?: error("Chapter $chapterId not found")
-                val novel = novelRepository.getNovelById(chapter.novelId)
-                val source = sourceManager.get(novel.source)
-                    ?: error("Source ${novel.source} not available")
+    @Composable
+    private fun ScrollingText(
+        state: NovelReaderScreenModel.State,
+        style: TextStyle,
+        sidePadding: Int,
+        speaking: Int?,
+        listState: LazyListState,
+        onPosition: (Int) -> Unit,
+        onRead: () -> Unit,
+        onChapter: (Long) -> Unit,
+    ) {
+        // Restore the saved paragraph once the text is loaded, then persist further scrolling.
+        LaunchedEffect(Unit) {
+            if (state.savedParagraph > 0) {
+                listState.scrollToItem(state.savedParagraph.coerceAtMost(state.text.size))
+            }
+        }
+        LaunchedEffect(listState) {
+            snapshotFlow { listState.firstVisibleItemIndex }
+                .drop(1)
+                .debounce(SAVE_POSITION_DEBOUNCE_MS)
+                .collect(onPosition)
+        }
+        // The chapter counts as read once its end (the navigation row) scrolls into view.
+        val reachedEnd by remember {
+            derivedStateOf {
+                val info = listState.layoutInfo
+                info.totalItemsCount > 0 && info.visibleItemsInfo.lastOrNull()?.index == info.totalItemsCount - 1
+            }
+        }
+        LaunchedEffect(reachedEnd) {
+            if (reachedEnd) onRead()
+        }
+        // Follow the paragraph being read aloud when it scrolls out of view.
+        LaunchedEffect(speaking) {
+            val index = speaking ?: return@LaunchedEffect
+            val visible = listState.layoutInfo.visibleItemsInfo.map { it.index }
+            if (index !in visible.dropLast(1)) listState.animateScrollToItem(index)
+        }
 
-                val html = source.getChapterText(
-                    SNovelChapter.create().also {
-                        it.url = chapter.url
-                        it.name = chapter.name
-                    },
-                )
-                val paragraphs = withContext(Dispatchers.Default) { htmlToParagraphs(html) }
-                val siblings = chapterRepository.getChapterByNovelId(chapter.novelId).sortedBy { it.sourceOrder }
-                val index = siblings.indexOfFirst { it.id == chapterId }
-                _state.update {
-                    it.copy(
-                        loading = false,
-                        chapterName = chapter.name,
-                        paragraphs = paragraphs,
-                        startParagraph = chapter.lastPosition.toInt(),
-                        previousChapterId = siblings.getOrNull(index - 1)?.id,
-                        nextChapterId = siblings.getOrNull(index + 1)?.id,
+        SelectionContainer {
+            LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+                itemsIndexed(state.text) { index, paragraph ->
+                    Paragraph(
+                        text = paragraph,
+                        style = style,
+                        highlighted = index == speaking,
+                        modifier = Modifier.padding(horizontal = sidePadding.dp, vertical = PARAGRAPH_GAP / 2),
                     )
                 }
-                // Shows up in History right away; the reading time is added when leaving.
-                chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = 0)
-            }.onFailure { e ->
-                _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
+                item { ChapterNavigation(state, onChapter) }
             }
         }
     }
 
-    fun savePosition(paragraph: Int) {
-        screenModelScope.launch {
-            chapterRepository.update(NovelChapterUpdate(id = chapterId, lastPosition = paragraph.toLong()))
+    @Composable
+    private fun PagedText(
+        state: NovelReaderScreenModel.State,
+        style: TextStyle,
+        sidePadding: Int,
+        speaking: Int?,
+        pagerState: PagerState,
+        pages: List<NovelPage>?,
+        onPagesChange: (List<NovelPage>?) -> Unit,
+        onTurn: (forward: Boolean) -> Unit,
+        onPosition: (Int) -> Unit,
+        onRead: () -> Unit,
+        onChapter: (Long) -> Unit,
+    ) {
+        val measurer = rememberTextMeasurer()
+        val density = LocalDensity.current
+        BoxWithConstraints(Modifier.fillMaxSize()) {
+            val width = with(density) { (maxWidth - sidePadding.dp * 2).roundToPx() }
+            val height = with(density) { (maxHeight - PARAGRAPH_GAP * 2).roundToPx() }
+            val gap = with(density) { PARAGRAPH_GAP.roundToPx() }
+            val text = state.text
+
+            // Pages from an earlier visit would point at a stale spot: start over when leaving.
+            DisposableEffect(Unit) {
+                onDispose { onPagesChange(null) }
+            }
+            // Re-paginate when the text, the style or the screen size change, keeping the reading spot.
+            LaunchedEffect(text, style, width, height) {
+                val keep = pages?.getOrNull(pagerState.currentPage)?.firstParagraph ?: state.savedParagraph
+                val result = withContext(Dispatchers.Default) { paginate(text, measurer, style, width, height, gap) }
+                onPagesChange(result)
+                pagerState.scrollToPage(pageOfParagraph(result, keep))
+            }
+            if (pages == null) {
+                CircularProgressIndicator(Modifier.align(Alignment.Center))
+                return@BoxWithConstraints
+            }
+            LaunchedEffect(pagerState, pages) {
+                snapshotFlow { pagerState.currentPage }
+                    .drop(1)
+                    .debounce(SAVE_POSITION_DEBOUNCE_MS)
+                    .collect { page ->
+                        pages.getOrNull(page)?.let { onPosition(it.firstParagraph) }
+                        if (pages.isNotEmpty() && page >= pages.lastIndex) onRead()
+                    }
+            }
+            LaunchedEffect(speaking, pages) {
+                val index = speaking ?: return@LaunchedEffect
+                val page = pages.indexOfFirst { page -> page.slices.any { it.paragraph == index } }
+                if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
+            }
+
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        // Taps on the outer thirds turn the page, like a book.
+                        detectTapGestures { offset ->
+                            when {
+                                offset.x < size.width / 3f -> onTurn(false)
+                                offset.x > size.width * 2 / 3f -> onTurn(true)
+                            }
+                        }
+                    },
+            ) { pageIndex ->
+                val page = pages.getOrNull(pageIndex)
+                if (page == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        ChapterNavigation(state, onChapter)
+                    }
+                    return@HorizontalPager
+                }
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = sidePadding.dp, vertical = PARAGRAPH_GAP),
+                ) {
+                    page.slices.forEachIndexed { i, slice ->
+                        // Pages can lag one frame behind a text change (translation on/off).
+                        val paragraph = text.getOrNull(slice.paragraph) ?: return@forEachIndexed
+                        if (i > 0) Spacer(Modifier.height(PARAGRAPH_GAP))
+                        val end = slice.end.coerceAtMost(paragraph.length)
+                        Paragraph(
+                            text = paragraph.substring(slice.start.coerceAtMost(end), end).trimEnd(),
+                            style = style,
+                            highlighted = slice.paragraph == speaking,
+                        )
+                    }
+                }
+            }
         }
     }
 
-    fun markRead() {
-        screenModelScope.launch {
-            chapterRepository.update(NovelChapterUpdate(id = chapterId, read = true))
-        }
+    @Composable
+    private fun Paragraph(
+        text: String,
+        style: TextStyle,
+        highlighted: Boolean,
+        modifier: Modifier = Modifier,
+    ) {
+        val highlight by animateFloatAsState(if (highlighted) HIGHLIGHT_ALPHA else 0f, label = "speech")
+        Text(
+            text = text,
+            style = style,
+            modifier = modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = highlight)),
+        )
     }
 
-    @OptIn(DelicateCoroutinesApi::class)
-    override fun onDispose() {
-        if (_state.value.loading || _state.value.error != null) return
-        val duration = System.currentTimeMillis() - openedAt
-        // screenModelScope is being cancelled, so the last write goes through a global scope.
-        GlobalScope.launch(Dispatchers.IO) {
-            chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = duration)
+    @Composable
+    private fun ChapterNavigation(state: NovelReaderScreenModel.State, onChapter: (Long) -> Unit) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            TextButton(
+                enabled = state.previousChapterId != null,
+                onClick = { state.previousChapterId?.let(onChapter) },
+            ) { Text(stringResource(MR.strings.action_previous_chapter)) }
+            TextButton(
+                enabled = state.nextChapterId != null,
+                onClick = { state.nextChapterId?.let(onChapter) },
+            ) { Text(stringResource(MR.strings.action_next_chapter)) }
         }
     }
+}
 
-    /** Blank lines separate paragraphs; `<p>` and `<div>` become blank lines in legacy mode. */
-    private fun htmlToParagraphs(html: String): List<String> =
-        HtmlCompat.fromHtml(html, HtmlCompat.FROM_HTML_MODE_LEGACY).toString()
-            .split(Regex("\\n\\s*\\n"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
+private const val HIGHLIGHT_ALPHA = 0.18f
 
-    data class State(
-        val loading: Boolean = true,
-        val chapterName: String = "",
-        val paragraphs: List<String> = emptyList(),
-        val startParagraph: Int = 0,
-        val previousChapterId: Long? = null,
-        val nextChapterId: Long? = null,
-        val error: String? = null,
-    )
+private fun ReaderFont.toFontFamily(): FontFamily = when (this) {
+    ReaderFont.DEFAULT -> FontFamily.Default
+    ReaderFont.SERIF -> FontFamily.Serif
+    ReaderFont.SANS_SERIF -> FontFamily.SansSerif
+    ReaderFont.MONOSPACE -> FontFamily.Monospace
 }
