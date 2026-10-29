@@ -21,6 +21,7 @@ import eu.kanade.tachiyomi.ui.history.anime.animeHistoryTab
 import eu.kanade.tachiyomi.ui.history.anime.resumeLastEpisodeSeenEvent
 import eu.kanade.tachiyomi.ui.history.manga.MangaHistoryScreenModel
 import eu.kanade.tachiyomi.ui.history.manga.mangaHistoryTab
+import eu.kanade.tachiyomi.ui.history.novel.novelHistoryTab
 import eu.kanade.tachiyomi.ui.main.MainActivity
 import kotlinx.collections.immutable.persistentListOf
 import tachiyomi.i18n.MR
@@ -65,6 +66,7 @@ data object HistoriesTab : Tab {
             tabs = persistentListOf(
                 animeHistoryTab(context, fromMore),
                 mangaHistoryTab(context, fromMore),
+                novelHistoryTab(),
             ),
             mangaSearchQuery = mangaSearchQuery,
             onChangeMangaSearchQuery = mangaHistoryScreenModel::search,

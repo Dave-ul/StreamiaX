@@ -1,11 +1,13 @@
 package tachiyomi.data.items.novelchapter
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.handlers.novel.NovelDatabaseHandler
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
+import tachiyomi.domain.items.novelchapter.model.NovelHistoryItem
 import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
 import java.util.Date
 
@@ -104,6 +106,23 @@ class NovelChapterRepositoryImpl(
             handler.await { novelhistoryQueries.upsert(chapterId, readAt, sessionReadDuration) }
         } catch (e: Exception) {
             logcat(LogPriority.ERROR, e)
+        }
+    }
+
+    override fun getRecentHistoryAsFlow(): Flow<List<NovelHistoryItem>> {
+        return handler.subscribeToList { novelhistoryQueries.getRecent() }.map { rows ->
+            rows.map {
+                NovelHistoryItem(
+                    novelId = it.novelId,
+                    chapterId = it.chapterId,
+                    title = it.title,
+                    thumbnailUrl = it.thumbnail_url,
+                    source = it.source,
+                    novelUrl = it.novelUrl,
+                    chapterName = it.chapterName,
+                    readAt = it.last_read,
+                )
+            }
         }
     }
 

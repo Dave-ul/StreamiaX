@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.MenuBook
 import androidx.compose.material.icons.outlined.Explore
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -17,6 +18,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -25,12 +27,14 @@ import cafe.adriel.voyager.core.model.rememberScreenModel
 import cafe.adriel.voyager.core.model.screenModelScope
 import cafe.adriel.voyager.navigator.LocalNavigator
 import cafe.adriel.voyager.navigator.currentOrThrow
+import cafe.adriel.voyager.navigator.tab.TabOptions
+import eu.kanade.domain.ui.model.NavStyle
 import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.entries.components.ItemCover
 import eu.kanade.presentation.library.components.LazyLibraryGrid
 import eu.kanade.presentation.library.components.LibraryTabs
-import eu.kanade.presentation.util.Screen
+import eu.kanade.presentation.util.Tab
 import eu.kanade.tachiyomi.ui.novel.NovelSourcesScreen
 import eu.kanade.tachiyomi.ui.novel.NovelDetailScreen
 import kotlinx.collections.immutable.persistentListOf
@@ -42,18 +46,35 @@ import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.novel.repository.NovelCategoryRepository
 import tachiyomi.domain.entries.novel.repository.NovelRepository
 import tachiyomi.domain.library.novel.LibraryNovel
+import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.presentation.core.components.material.Scaffold
+import tachiyomi.presentation.core.i18n.stringResource
 import tachiyomi.presentation.core.screens.EmptyScreen
 import tachiyomi.presentation.core.screens.LoadingScreen
 import uy.kohesive.injekt.Injekt
 import uy.kohesive.injekt.api.get
 
-/** Grid of the novels marked as favorite, mirroring the manga library screen. */
-class NovelLibraryScreen : Screen() {
+/** Bottom-nav tab with the novels marked as favorite, mirroring the manga library tab. */
+data object NovelLibraryTab : Tab {
+
+    override val options: TabOptions
+        @Composable
+        get() = TabOptions(
+            index = 6u,
+            title = stringResource(AYMR.strings.label_novel),
+            icon = rememberVectorPainter(Icons.AutoMirrored.Outlined.MenuBook),
+        )
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
+        // Only reachable through More (pushed on the stack) when the nav style moves it there.
+        val fromMore = currentNavigationStyle() == NavStyle.MOVE_NOVEL_TO_MORE
+        val navigateUp: (() -> Unit)? = if (fromMore) {
+            { navigator.pop() }
+        } else {
+            null
+        }
         val screenModel = rememberScreenModel { NovelLibraryScreenModel() }
         val state by screenModel.state.collectAsState()
         val scope = rememberCoroutineScope()
@@ -61,8 +82,8 @@ class NovelLibraryScreen : Screen() {
         Scaffold(
             topBar = {
                 AppBar(
-                    title = "Novels",
-                    navigateUp = navigator::pop,
+                    title = stringResource(AYMR.strings.label_novel),
+                    navigateUp = navigateUp,
                     actions = {
                         AppBarActions(
                             actions = persistentListOf(

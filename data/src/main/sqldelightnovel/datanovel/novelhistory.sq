@@ -40,6 +40,32 @@ WHERE _id IN (
     WHERE N._id = :novelId
 );
 
+-- Latest read chapter of every novel, newest first.
+getRecent:
+SELECT
+N._id AS novelId,
+C._id AS chapterId,
+N.title,
+N.thumbnail_url,
+N.source,
+N.url AS novelUrl,
+C.name AS chapterName,
+H.last_read
+FROM novelhistory H
+JOIN novel_chapters C
+ON H.chapter_id = C._id
+JOIN novels N
+ON C.novel_id = N._id
+WHERE H.last_read > 0
+AND H.last_read = (
+    SELECT max(H2.last_read)
+    FROM novelhistory H2
+    JOIN novel_chapters C2
+    ON H2.chapter_id = C2._id
+    WHERE C2.novel_id = N._id
+)
+ORDER BY H.last_read DESC;
+
 removeAllHistory:
 DELETE FROM novelhistory;
 

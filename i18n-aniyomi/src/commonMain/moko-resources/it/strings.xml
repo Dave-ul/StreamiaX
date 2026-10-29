@@ -527,4 +527,9 @@
     <string name="pref_download_fillermarked_items">Consenti il download degli episodi segnati come filler</string>
     <string name="show_episode_previews">Miniature episodi</string>
     <string name="show_episode_summaries">Riepiloghi episodi</string>
+    <string name="label_novel">Novel</string>
+    <string name="pref_bottom_nav_no_novel">Sposta Novel nella scheda Altro</string>
+    <string name="novel_reader_text_settings">Impostazioni testo</string>
+    <string name="novel_reader_font_size">Dimensione testo</string>
+    <string name="novel_reader_line_height">Interlinea</string>
 </resources>

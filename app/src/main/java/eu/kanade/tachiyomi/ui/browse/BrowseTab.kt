@@ -26,6 +26,7 @@ import eu.kanade.tachiyomi.ui.browse.manga.extension.mangaExtensionsTab
 import eu.kanade.tachiyomi.ui.browse.manga.migration.sources.migrateMangaSourceTab
 import eu.kanade.tachiyomi.ui.browse.manga.source.mangaSourcesTab
 import eu.kanade.tachiyomi.ui.main.MainActivity
+import eu.kanade.tachiyomi.ui.novel.novelSourcesTab
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
@@ -81,6 +82,8 @@ data object BrowseTab : Tab {
             mangaExtensionsTab(mangaExtensionsScreenModel),
             migrateAnimeSourceTab(),
             migrateMangaSourceTab(),
+            // Last, so the page-parity search wiring of TabbedScreen keeps working for the others.
+            novelSourcesTab(),
         )
 
         val state = rememberPagerState { tabs.size }
