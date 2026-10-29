@@ -532,6 +532,14 @@
     <string name="novel_reader_text_settings">Impostazioni testo</string>
     <string name="novel_reader_font_size">Dimensione testo</string>
     <string name="novel_reader_line_height">Interlinea</string>
+    <string name="player_online_subtitles">Sottotitoli online</string>
+    <string name="player_online_subtitles_search">Cerca sottotitoli online</string>
+    <string name="player_online_subtitles_title">Titolo</string>
+    <string name="player_online_subtitles_empty">Nessun sottotitolo trovato. Prova un altro titolo o un\'altra lingua.</string>
+    <string name="player_online_subtitles_error">Ricerca non riuscita: %1$s</string>
+    <string name="player_online_subtitles_downloads">%1$d download</string>
+    <string name="player_online_subtitles_file_match">corrisponde a questo file</string>
+    <string name="player_online_subtitles_hi">per non udenti</string>
     <string name="label_novel_sources">Fonti Novel</string>
     <string name="label_novel_extensions">Estensioni Novel</string>
     <string name="label_migration_novel">Migra Novel</string>
