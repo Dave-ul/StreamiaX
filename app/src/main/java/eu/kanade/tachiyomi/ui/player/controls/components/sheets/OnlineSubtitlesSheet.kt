@@ -154,7 +154,7 @@ private fun OnlineSubtitleRow(
                 style = MaterialTheme.typography.bodyMedium,
             )
             val details = buildList {
-                add(result.provider)
+                add(result.provider.label)
                 add(result.format.uppercase())
                 if (result.downloads > 0) {
                     add(stringResource(AYMR.strings.player_online_subtitles_downloads, result.downloads))

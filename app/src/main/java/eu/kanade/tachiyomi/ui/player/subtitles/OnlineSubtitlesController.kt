@@ -38,14 +38,9 @@ class OnlineSubtitlesController(
 
     private var searchJob: Job? = null
 
-    /** Starts from [initial] the first time, or when the playing episode changed since. */
+    /** Starts from [initial] the first time, or when the video, season or episode changed since. */
     fun open(initial: OnlineSubtitles.Query) {
-        val previous = _state.value.query
-        if (previous != null && previous.localVideo == initial.localVideo &&
-            previous.imdbId == initial.imdbId && previous.episode == initial.episode
-        ) {
-            return
-        }
+        if (_state.value.query?.sameVideoAs(initial) == true) return
         _state.value = State(query = initial)
         search(initial.title, initial.language)
     }
@@ -55,7 +50,7 @@ class OnlineSubtitlesController(
         searchJob?.cancel()
         _state.update { it.copy(query = query, searching = true, error = null) }
         searchJob = scope.launch {
-            runCatching { subtitles.search(context, query) }
+            catching { subtitles.search(context, query) }
                 .onSuccess { results ->
                     _state.update { it.copy(searching = false, searched = true, results = results) }
                 }
@@ -69,12 +64,13 @@ class OnlineSubtitlesController(
     }
 
     fun add(result: OnlineSubtitles.Result) {
+        // Calls come from the UI thread, so check-then-set cannot race.
         if (_state.value.downloadingId != null) return
         _state.update { it.copy(downloadingId = result.id, error = null) }
         scope.launch {
-            runCatching { subtitles.download(result, cacheDir) }
+            catching { subtitles.download(result, cacheDir) }
                 .onSuccess { file ->
-                    onDownloaded(file, "${result.name} (${result.provider})")
+                    onDownloaded(file, "${result.name} (${result.provider.label})")
                     _state.update { it.copy(downloadingId = null, addedIds = it.addedIds + result.id) }
                 }
                 .onFailure { e ->
