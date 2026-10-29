@@ -31,7 +31,7 @@ import eu.kanade.presentation.entries.components.ItemCover
 import eu.kanade.presentation.library.components.LazyLibraryGrid
 import eu.kanade.presentation.library.components.LibraryTabs
 import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.ui.novel.NovelCatalogScreen
+import eu.kanade.tachiyomi.ui.novel.NovelSourcesScreen
 import eu.kanade.tachiyomi.ui.novel.NovelDetailScreen
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.SharingStarted
@@ -69,7 +69,7 @@ class NovelLibraryScreen : Screen() {
                                 AppBar.Action(
                                     title = "Browse sources",
                                     icon = Icons.Outlined.Explore,
-                                    onClick = { navigator.push(NovelCatalogScreen()) },
+                                    onClick = { navigator.push(NovelSourcesScreen()) },
                                 ),
                             ),
                         )

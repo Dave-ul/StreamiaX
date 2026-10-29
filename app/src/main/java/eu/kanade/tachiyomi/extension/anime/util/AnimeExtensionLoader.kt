@@ -10,7 +10,6 @@ import androidx.core.content.pm.PackageInfoCompat
 import dalvik.system.PathClassLoader
 import eu.kanade.domain.extension.anime.interactor.TrustAnimeExtension
 import eu.kanade.domain.source.service.SourcePreferences
-import eu.kanade.tachiyomi.animesource.AnimeCatalogueSource
 import eu.kanade.tachiyomi.animesource.AnimeSource
 import eu.kanade.tachiyomi.animesource.AnimeSourceFactory
 import eu.kanade.tachiyomi.extension.anime.model.AnimeExtension
@@ -44,8 +43,14 @@ internal object AnimeExtensionLoader {
     private const val METADATA_NSFW = "tachiyomi.animeextension.nsfw"
     private const val METADATA_HAS_README = "tachiyomi.animeextension.hasReadme"
     private const val METADATA_HAS_CHANGELOG = "tachiyomi.animeextension.hasChangelog"
-    const val LIB_VERSION_MIN = 12
-    const val LIB_VERSION_MAX = 16
+    private const val METADATA_TORRENT = "tachiyomi.animeextension.torrent"
+
+    private const val METADATA_NAME = "aniyomix.name"
+    private const val METADATA_EXTENSION_LIB = "aniyomix.extensionLib"
+    private const val METADATA_CONTENT_WARNING = "aniyomix.contentWarning"
+    private const val METADATA_IS_TORRENT = "aniyomix.torrent"
+
+    private val SUPPORTED_LIB_VERSIONS = listOf(14.0, 16.0, 17.0)
 
     @Suppress("DEPRECATION")
     private val PACKAGE_FLAGS = PackageManager.GET_CONFIGURATIONS or
@@ -241,7 +246,8 @@ internal object AnimeExtensionLoader {
         val appInfo = pkgInfo.applicationInfo!!
         val pkgName = pkgInfo.packageName
 
-        val extName = pkgManager.getApplicationLabel(appInfo).toString().substringAfter("Aniyomi: ")
+        val extName = appInfo.metaData.getString(METADATA_NAME)
+            ?: pkgManager.getApplicationLabel(appInfo).toString().substringAfter("Aniyomi: ")
         val versionName = pkgInfo.versionName
         val versionCode = PackageInfoCompat.getLongVersionCode(pkgInfo)
 
@@ -251,11 +257,14 @@ internal object AnimeExtensionLoader {
         }
 
         // Validate lib version
-        val libVersion = versionName.substringBeforeLast('.').toDoubleOrNull()
-        if (libVersion == null || libVersion < LIB_VERSION_MIN || libVersion > LIB_VERSION_MAX) {
+        val libVersion = appInfo.metaData.getInt(METADATA_EXTENSION_LIB)
+            .takeUnless { it == 0 }
+            ?.toString()
+            ?.toDouble()
+            ?: versionName.substringBeforeLast('.').toDoubleOrNull()
+        if (libVersion == null || libVersion !in SUPPORTED_LIB_VERSIONS) {
             logcat(LogPriority.WARN) {
-                "Lib version is $libVersion, while only versions " +
-                    "$LIB_VERSION_MIN to $LIB_VERSION_MAX are allowed"
+                "Lib version is $libVersion, while only version(s) ${SUPPORTED_LIB_VERSIONS.joinToString()} are supported"
             }
             return AnimeLoadResult.Error
         }
@@ -277,12 +286,15 @@ internal object AnimeExtensionLoader {
             return AnimeLoadResult.Untrusted(extension)
         }
 
-        val isNsfw = appInfo.metaData.getInt(METADATA_NSFW) == 1
+        val isNsfw = appInfo.metaData.getInt(METADATA_CONTENT_WARNING) > 0 ||
+            appInfo.metaData.getInt(METADATA_NSFW) == 1
         if (!loadNsfwSource && isNsfw) {
             logcat(LogPriority.WARN) { "NSFW extension $pkgName not allowed" }
             return AnimeLoadResult.Error
         }
 
+        val isTorrent = appInfo.metaData.getBoolean(METADATA_IS_TORRENT) ||
+            appInfo.metaData.getInt(METADATA_TORRENT) == 1
         val classLoader = try {
             ChildFirstPathClassLoader(appInfo.sourceDir, null, context.classLoader)
         } catch (e: Exception) {
@@ -333,9 +345,7 @@ internal object AnimeExtensionLoader {
                 }
             }
 
-        val langs = sources.filterIsInstance<AnimeCatalogueSource>()
-            .map { it.lang }
-            .toSet()
+        val langs = sources.map { it.lang }.toSet()
         val lang = when (langs.size) {
             0 -> ""
             1 -> langs.first()
@@ -350,6 +360,7 @@ internal object AnimeExtensionLoader {
             libVersion = libVersion,
             lang = lang,
             isNsfw = isNsfw,
+            isTorrent = isTorrent,
             sources = sources,
             pkgFactory = appInfo.metaData.getString(METADATA_SOURCE_FACTORY),
             icon = appInfo.loadIcon(pkgManager),

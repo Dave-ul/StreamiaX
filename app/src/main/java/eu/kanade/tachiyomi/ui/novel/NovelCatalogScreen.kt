@@ -47,7 +47,7 @@ import uy.kohesive.injekt.api.get
 
 data class NovelUi(val url: String, val title: String, val author: String?)
 
-/** Browses a single novel source. Source picking moves into the Browse tab in a later step. */
+/** Browses a single novel source, picked in [NovelSourcesScreen]. */
 class NovelCatalogScreen(
     private val sourceId: Long? = null,
 ) : Screen() {
