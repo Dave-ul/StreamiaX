@@ -82,7 +82,11 @@ class NovelDetailScreen(
                                     add(
                                         AppBar.Action(
                                             title = stringResource(
-                                                if (state.favorite) MR.strings.remove_from_library else MR.strings.add_to_library,
+                                                if (state.favorite) {
+                                                    MR.strings.remove_from_library
+                                                } else {
+                                                    MR.strings.add_to_library
+                                                },
                                             ),
                                             icon = if (state.favorite) {
                                                 Icons.Filled.Favorite
