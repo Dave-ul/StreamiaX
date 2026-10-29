@@ -4,8 +4,10 @@ import tachiyomi.core.common.preference.PreferenceStore
 import tachiyomi.core.common.preference.getEnum
 
 /**
- * Novel reader settings. Defaults and theme presets follow lnreader
- * (src/hooks/persisted/useSettings.ts, src/utils/constants/readerConstants.ts).
+ * Novel reader settings. Theme presets and the line height, keep-screen-on, page mode and
+ * speech defaults follow lnreader (src/hooks/persisted/useSettings.ts,
+ * src/utils/constants/readerConstants.ts). Text size (18) and side margins (20) keep
+ * StreamiaX's own defaults; lnreader uses 16 and 16.
  */
 class NovelReaderPreferences(private val store: PreferenceStore) {
 

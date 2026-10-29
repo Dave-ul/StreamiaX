@@ -10,12 +10,16 @@ import tachiyomi.core.common.util.system.logcat
 import java.util.Locale
 
 /**
- * Reads a chapter aloud one paragraph at a time with the system text-to-speech engine,
- * like lnreader's TTS (rate, pitch, optional jump to the next chapter at the end).
+ * Reads a chapter aloud with the system text-to-speech engine, like lnreader's TTS (rate,
+ * pitch, optional jump to the next chapter at the end). The rest of the chapter is queued
+ * at once, one utterance per paragraph (or per part of a long one), so the engine reports
+ * which paragraph it is on.
  */
 class NovelSpeech(
     context: Context,
     private val onChapterEnd: () -> Unit,
+    /** The engine could not start or rejected the text: nothing will be heard. */
+    private val onUnavailable: () -> Unit,
 ) {
 
     /** Paragraph being read, or null when idle. */
@@ -23,15 +27,18 @@ class NovelSpeech(
     val speaking = _speaking.asStateFlow()
 
     private var ready = false
+    private var failed = false
     private var pending: (() -> Unit)? = null
 
     private val tts = TextToSpeech(context.applicationContext) { status ->
         ready = status == TextToSpeech.SUCCESS
+        failed = !ready
         if (ready) {
             pending?.invoke()
         } else {
             logcat(LogPriority.ERROR) { "Text-to-speech init failed: $status" }
             _speaking.value = null
+            if (pending != null) onUnavailable()
         }
         pending = null
     }
@@ -53,6 +60,9 @@ class NovelSpeech(
                 @Deprecated("Deprecated in Java")
                 override fun onError(utteranceId: String) {
                     logcat(LogPriority.WARN) { "Text-to-speech failed on $utteranceId" }
+                    // onDone never comes for a failed utterance: without this the last one
+                    // would leave the reader "speaking" forever.
+                    if (utteranceId.endsWith(LAST_MARK)) _speaking.value = null
                 }
             },
         )
@@ -60,11 +70,17 @@ class NovelSpeech(
 
     /** Queues [paragraphs] from [from] to the end of the chapter. */
     fun speak(paragraphs: List<String>, from: Int, locale: Locale?, rate: Float, pitch: Float) {
-        val start = from.coerceIn(0, (paragraphs.size - 1).coerceAtLeast(0))
+        if (failed) {
+            onUnavailable()
+            return
+        }
+        if (paragraphs.isEmpty()) return
+        val start = from.coerceIn(0, paragraphs.lastIndex)
         _speaking.value = start
-        val action = {
+        val action = action@{
             tts.stop()
-            locale?.takeIf { tts.isLanguageAvailable(it) >= TextToSpeech.LANG_AVAILABLE }?.let(tts::setLanguage)
+            locale?.takeIf { tts.isLanguageAvailable(it) >= TextToSpeech.LANG_AVAILABLE }
+                ?.let(tts::setLanguage)
             tts.setSpeechRate(rate)
             tts.setPitch(pitch)
             val maxLength = TextToSpeech.getMaxSpeechInputLength()
@@ -73,7 +89,12 @@ class NovelSpeech(
                 parts.forEachIndexed { part, text ->
                     val last = index == paragraphs.lastIndex && part == parts.lastIndex
                     val id = "$index:$part" + if (last) LAST_MARK else ""
-                    tts.speak(text, TextToSpeech.QUEUE_ADD, null, id)
+                    if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) {
+                        tts.stop()
+                        _speaking.value = null
+                        onUnavailable()
+                        return@action
+                    }
                 }
             }
         }

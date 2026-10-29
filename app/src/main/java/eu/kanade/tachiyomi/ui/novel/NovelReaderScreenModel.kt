@@ -14,8 +14,10 @@ import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -44,8 +46,16 @@ class NovelReaderScreenModel(
 
     private val openedAt = System.currentTimeMillis()
 
-    private val speech = NovelSpeech(Injekt.get<Application>(), onChapterEnd = ::onSpeechChapterEnd)
+    private val speech = NovelSpeech(
+        context = Injekt.get<Application>(),
+        onChapterEnd = ::onSpeechChapterEnd,
+        onUnavailable = { _state.update { it.copy(speechUnavailable = true) } },
+    )
     val speaking = speech.speaking
+
+    /** Chapters to open and keep reading aloud: a one-shot event, not state. */
+    private val _speakNext = Channel<Long>(Channel.CONFLATED)
+    val speakNext = _speakNext.receiveAsFlow()
 
     private var translateJob: Job? = null
 
@@ -77,7 +87,7 @@ class NovelReaderScreenModel(
                         chapterName = chapter.name,
                         paragraphs = paragraphs,
                         sourceLanguage = source.lang,
-                        startParagraph = chapter.lastPosition.toInt(),
+                        savedParagraph = chapter.lastPosition.toInt(),
                         previousChapterId = siblings.getOrNull(index - 1)?.id,
                         nextChapterId = siblings.getOrNull(index + 1)?.id,
                     )
@@ -92,11 +102,14 @@ class NovelReaderScreenModel(
                 translateJob = launchTranslation()
                 translateJob?.join()
             }
-            if (autoSpeak) startSpeech(_state.value.startParagraph)
+            // Speech carried over from the previous chapter starts this one from the top.
+            if (autoSpeak) startSpeech(0)
         }
     }
 
     fun savePosition(paragraph: Int) {
+        // Kept in state too, so switching between scrolling and pages returns to this spot.
+        _state.update { it.copy(savedParagraph = paragraph) }
         screenModelScope.launch {
             chapterRepository.update(NovelChapterUpdate(id = chapterId, lastPosition = paragraph.toLong()))
         }
@@ -114,6 +127,8 @@ class NovelReaderScreenModel(
         preferences.translate().set(enabled)
         speech.stop()
         translateJob?.cancel()
+        // While loading, load() starts the translation once the text is there.
+        if (_state.value.loading) return
         if (enabled) {
             translateJob = launchTranslation()
         } else {
@@ -128,7 +143,8 @@ class NovelReaderScreenModel(
     }
 
     private fun launchTranslation(): Job = screenModelScope.launch {
-        _state.update { it.copy(translating = true, translationError = null) }
+        // Back to the original until the new translation arrives, so text and speech language agree.
+        _state.update { it.copy(translated = null, translating = true, translationError = null) }
         runCatching { translator.translate(_state.value.paragraphs, translationTarget()) }
             .onSuccess { translated -> _state.update { it.copy(translated = translated, translating = false) } }
             .onFailure { e ->
@@ -146,6 +162,7 @@ class NovelReaderScreenModel(
     fun startSpeech(fromParagraph: Int) {
         val state = _state.value
         if (state.loading || state.error != null) return
+        _state.update { it.copy(speechUnavailable = false) }
         val language = if (state.translated != null) translationTarget() else state.sourceLanguage
         val locale = language?.takeIf { it.isNotBlank() && it !in NON_LANGUAGES }?.let(Locale::forLanguageTag)
         speech.speak(
@@ -160,10 +177,11 @@ class NovelReaderScreenModel(
     fun stopSpeech() = speech.stop()
 
     private fun onSpeechChapterEnd() {
-        val next = _state.value.nextChapterId
-        markRead()
-        if (next != null && preferences.speechNextChapter().get()) {
-            _state.update { it.copy(speakNextChapter = next) }
+        val next = _state.value.nextChapterId?.takeIf { preferences.speechNextChapter().get() }
+        screenModelScope.launch {
+            // Written before moving on: leaving the screen cancels this scope.
+            chapterRepository.update(NovelChapterUpdate(id = chapterId, read = true))
+            next?.let { _speakNext.send(it) }
         }
     }
 
@@ -193,11 +211,11 @@ class NovelReaderScreenModel(
         val translating: Boolean = false,
         val translationError: String? = null,
         val sourceLanguage: String? = null,
-        val startParagraph: Int = 0,
+        /** Last saved reading position (paragraph index). */
+        val savedParagraph: Int = 0,
         val previousChapterId: Long? = null,
         val nextChapterId: Long? = null,
-        /** Set when speech reached the end and should continue in this chapter. */
-        val speakNextChapter: Long? = null,
+        val speechUnavailable: Boolean = false,
         val error: String? = null,
     ) {
         /** What the reader shows and speaks: the translation when there is one. */

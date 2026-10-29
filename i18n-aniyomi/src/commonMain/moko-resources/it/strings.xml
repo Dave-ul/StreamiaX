@@ -534,6 +534,7 @@
     <string name="novel_reader_line_height">Interlinea</string>
     <string name="novel_reader_speak">Leggi ad alta voce</string>
     <string name="novel_reader_stop_speaking">Interrompi la lettura</string>
+    <string name="novel_reader_speech_unavailable">Lettura ad alta voce non disponibile: controlla il motore di sintesi vocale nelle impostazioni di sistema.</string>
     <string name="novel_reader_translate">Traduci</string>
     <string name="novel_reader_show_original">Mostra originale</string>
     <string name="novel_reader_translation_failed">Traduzione non riuscita: %1$s</string>

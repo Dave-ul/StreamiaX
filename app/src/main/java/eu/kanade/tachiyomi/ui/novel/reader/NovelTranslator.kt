@@ -7,6 +7,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonArray
 import logcat.LogPriority
@@ -61,20 +62,26 @@ class NovelTranslator(
         return parseBatch(json.parseToJsonElement(response.body.string()))
     }
 
+    /** One paragraph, trying the batch endpoint then gtx, a few times with a growing pause. */
     private suspend fun translateSingle(text: String, target: String): String {
-        var failure: Throwable? = null
-        repeat(RETRIES) { attempt ->
-            runCatching { translateBatch(listOf(text), target).single() }
-                .recoverCatching { gtx(text, target) }
-                .onSuccess { return it }
-                .onFailure {
-                    if (it is CancellationException) throw it
-                    failure = it
+        var lastError: Throwable = IllegalStateException("Translation failed")
+        for (attempt in 1..RETRIES) {
+            for (endpoint in listOf(::translateOne, ::gtx)) {
+                try {
+                    return endpoint(text, target)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    lastError = e
                 }
-            delay(RETRY_DELAY_MS * (attempt + 1))
+            }
+            delay(RETRY_DELAY_MS * attempt)
         }
-        throw failure ?: IllegalStateException("Translation failed")
+        throw lastError
     }
+
+    private suspend fun translateOne(text: String, target: String): String =
+        translateBatch(listOf(text), target).single()
 
     private suspend fun gtx(text: String, target: String): String {
         val url = GTX_URL.toHttpUrl().newBuilder()
@@ -113,20 +120,25 @@ class NovelTranslator(
             return result
         }
 
-        /** `[["testo","en"], …]` with `sl=auto`, or `["testo", …]` with a fixed source language. */
+        /**
+         * `[["testo","en"], …]` with `sl=auto`, or `["testo", …]` with a fixed source language.
+         * Throws when an item is missing or blank, so the batch is retried paragraph by paragraph.
+         */
         internal fun parseBatch(element: JsonElement): List<String> =
             element.jsonArray.map { item ->
-                when (item) {
-                    is JsonArray -> (item.first() as JsonPrimitive).content
-                    else -> (item as JsonPrimitive).content
-                }
+                val text = if (item is JsonArray) item.firstOrNull()?.textOrNull() else item.textOrNull()
+                requireNotNull(text?.takeIf(String::isNotBlank)) { "Missing translation in batch answer" }
             }
 
         /** `[[["testo","text",…], …], …]`: the translated sentences are the first item of each row. */
         internal fun parseGtx(element: JsonElement): String =
-            element.jsonArray.first().jsonArray.joinToString("") { row ->
-                (row.jsonArray.first() as? JsonPrimitive)?.content.orEmpty()
-            }
+            element.jsonArray.first().jsonArray
+                .joinToString("") { row -> row.jsonArray.firstOrNull()?.textOrNull().orEmpty() }
+                .also { require(it.isNotBlank()) { "Empty translation" } }
+
+        /** The string content, or null for JSON null and non-strings. */
+        private fun JsonElement.textOrNull(): String? =
+            (this as? JsonPrimitive)?.takeIf { it !is JsonNull && it.isString }?.content
 
         internal fun googleCode(language: String): String = when (language.lowercase()) {
             "zh", "zh-hans", "zh-cn" -> "zh-CN"

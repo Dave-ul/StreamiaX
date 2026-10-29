@@ -1,6 +1,5 @@
 package eu.kanade.tachiyomi.ui.novel
 
-import android.view.KeyEvent as AndroidKeyEvent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -53,8 +52,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.nativeKeyEvent
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
@@ -73,8 +73,10 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.ui.novel.reader.NovelPage
+import eu.kanade.tachiyomi.ui.novel.reader.NovelReaderPreferences
 import eu.kanade.tachiyomi.ui.novel.reader.NovelReaderSettingsSheet
 import eu.kanade.tachiyomi.ui.novel.reader.ReaderFont
+import eu.kanade.tachiyomi.ui.novel.reader.pageOfParagraph
 import eu.kanade.tachiyomi.ui.novel.reader.paginate
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.Dispatchers
@@ -90,8 +92,8 @@ import tachiyomi.presentation.core.util.collectAsState as collectPreferenceAsSta
 
 /**
  * Novel chapter reader: scrolling or paged text, reader themes, text-to-speech and
- * translation. Features and defaults follow lnreader and QuickNovel; the paged mode
- * and translation flow follow Dartotsu.
+ * translation. Features follow lnreader and QuickNovel; the paged mode and translation
+ * flow follow Dartotsu. Defaults are described in [NovelReaderPreferences].
  *
  * @param autoSpeak start reading aloud as soon as the chapter loads (speech continuing
  * from the previous chapter).
@@ -132,8 +134,8 @@ class NovelReaderScreen(
         )
 
         // Speech reached the end of the chapter: open the next one and keep reading.
-        LaunchedEffect(state.speakNextChapter) {
-            state.speakNextChapter?.let { navigator.replace(NovelReaderScreen(it, autoSpeak = true)) }
+        LaunchedEffect(screenModel) {
+            screenModel.speakNext.collect { navigator.replace(NovelReaderScreen(it, autoSpeak = true)) }
         }
 
         val view = LocalView.current
@@ -143,14 +145,16 @@ class NovelReaderScreen(
         }
 
         val listState = rememberLazyListState()
-        // One extra page holds the chapter navigation, like the last row of the scrolling reader.
-        var pages by remember { mutableStateOf<List<NovelPage>>(emptyList()) }
-        val pagerState = rememberPagerState { pages.size + 1 }
+        // Null until paginated. One extra page holds the chapter navigation, like the last row
+        // of the scrolling reader.
+        var pages by remember { mutableStateOf<List<NovelPage>?>(null) }
+        val pagerState = rememberPagerState { (pages?.size ?: 0) + 1 }
         val scope = rememberCoroutineScope()
         val focusRequester = remember { FocusRequester() }
 
         fun currentParagraph(): Int = if (paged) {
-            pages.getOrNull(pagerState.currentPage)?.firstParagraph ?: state.text.lastIndex
+            pages?.let { it.getOrNull(pagerState.currentPage)?.firstParagraph ?: state.text.lastIndex }
+                ?: state.savedParagraph
         } else {
             listState.firstVisibleItemIndex.coerceAtMost(state.text.lastIndex)
         }
@@ -218,13 +222,9 @@ class NovelReaderScreen(
                     .focusRequester(focusRequester)
                     .focusable()
                     .onPreviewKeyEvent { event ->
-                        val code = event.nativeKeyEvent.keyCode
-                        val isVolume = code == AndroidKeyEvent.KEYCODE_VOLUME_DOWN ||
-                            code == AndroidKeyEvent.KEYCODE_VOLUME_UP
+                        val isVolume = event.key == Key.VolumeDown || event.key == Key.VolumeUp
                         if (!volumeKeys || !isVolume) return@onPreviewKeyEvent false
-                        if (event.type == KeyEventType.KeyDown) {
-                            turn(forward = code == AndroidKeyEvent.KEYCODE_VOLUME_DOWN)
-                        }
+                        if (event.type == KeyEventType.KeyDown) turn(forward = event.key == Key.VolumeDown)
                         true
                     },
             ) {
@@ -263,6 +263,17 @@ class NovelReaderScreen(
                     }
                     if (state.translating) {
                         LinearProgressIndicator(Modifier.fillMaxWidth().align(Alignment.TopCenter))
+                    }
+                    if (state.speechUnavailable) {
+                        Text(
+                            text = stringResource(AYMR.strings.novel_reader_speech_unavailable),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .fillMaxWidth()
+                                .background(MaterialTheme.colorScheme.errorContainer)
+                                .padding(12.dp),
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
                     }
                     state.translationError?.let {
                         Text(
@@ -315,8 +326,8 @@ class NovelReaderScreen(
     ) {
         // Restore the saved paragraph once the text is loaded, then persist further scrolling.
         LaunchedEffect(Unit) {
-            if (state.startParagraph > 0) {
-                listState.scrollToItem(state.startParagraph.coerceAtMost(state.text.size))
+            if (state.savedParagraph > 0) {
+                listState.scrollToItem(state.savedParagraph.coerceAtMost(state.text.size))
             }
         }
         LaunchedEffect(listState) {
@@ -364,8 +375,8 @@ class NovelReaderScreen(
         sidePadding: Int,
         speaking: Int?,
         pagerState: PagerState,
-        pages: List<NovelPage>,
-        onPagesChange: (List<NovelPage>) -> Unit,
+        pages: List<NovelPage>?,
+        onPagesChange: (List<NovelPage>?) -> Unit,
         onTurn: (forward: Boolean) -> Unit,
         onPosition: (Int) -> Unit,
         onRead: () -> Unit,
@@ -379,13 +390,20 @@ class NovelReaderScreen(
             val gap = with(density) { PARAGRAPH_GAP.roundToPx() }
             val text = state.text
 
+            // Pages from an earlier visit would point at a stale spot: start over when leaving.
+            DisposableEffect(Unit) {
+                onDispose { onPagesChange(null) }
+            }
             // Re-paginate when the text, the style or the screen size change, keeping the reading spot.
             LaunchedEffect(text, style, width, height) {
-                val keep = pages.getOrNull(pagerState.currentPage)?.firstParagraph ?: state.startParagraph
+                val keep = pages?.getOrNull(pagerState.currentPage)?.firstParagraph ?: state.savedParagraph
                 val result = withContext(Dispatchers.Default) { paginate(text, measurer, style, width, height, gap) }
                 onPagesChange(result)
-                val target = result.indexOfLast { it.firstParagraph <= keep }.coerceAtLeast(0)
-                pagerState.scrollToPage(target)
+                pagerState.scrollToPage(pageOfParagraph(result, keep))
+            }
+            if (pages == null) {
+                CircularProgressIndicator(Modifier.align(Alignment.Center))
+                return@BoxWithConstraints
             }
             LaunchedEffect(pagerState, pages) {
                 snapshotFlow { pagerState.currentPage }
@@ -402,10 +420,6 @@ class NovelReaderScreen(
                 if (page >= 0 && page != pagerState.currentPage) pagerState.animateScrollToPage(page)
             }
 
-            if (pages.isEmpty()) {
-                CircularProgressIndicator(Modifier.align(Alignment.Center))
-                return@BoxWithConstraints
-            }
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier

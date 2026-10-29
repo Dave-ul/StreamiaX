@@ -420,6 +420,7 @@
     <string name="novel_reader_line_height">Line spacing</string>
     <string name="novel_reader_speak">Read aloud</string>
     <string name="novel_reader_stop_speaking">Stop reading aloud</string>
+    <string name="novel_reader_speech_unavailable">Read aloud is not available: check the text-to-speech engine in the system settings.</string>
     <string name="novel_reader_translate">Translate</string>
     <string name="novel_reader_show_original">Show original</string>
     <string name="novel_reader_translation_failed">Translation failed: %1$s</string>
