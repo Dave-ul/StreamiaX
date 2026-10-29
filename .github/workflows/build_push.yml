@@ -60,6 +60,15 @@ jobs:
       - name: Run unit tests
         run: ./gradlew testReleaseUnitTest
 
+      # The log only names the exception; the reports hold its message and stack trace
+      - name: Upload test reports
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: test-reports
+          path: '**/build/test-results/**/*.xml'
+          if-no-files-found: ignore
+
       # On tags the version name comes from the tag (v0.2.0-beta6 -> 0.2.0-beta6).
       # versionCode stays Aniyomi's: the app migrations are keyed on it.
       - name: Build APK
