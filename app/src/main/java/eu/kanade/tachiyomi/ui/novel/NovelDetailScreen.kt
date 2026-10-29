@@ -36,9 +36,7 @@ import eu.kanade.presentation.components.AppBar
 import eu.kanade.presentation.components.AppBarActions
 import eu.kanade.presentation.entries.components.ItemCover
 import eu.kanade.presentation.util.Screen
-import eu.kanade.tachiyomi.novelsource.NovelSource
 import eu.kanade.tachiyomi.novelsource.model.SNovel
-import eu.kanade.tachiyomi.source.novel.NovelSourceManager
 import eu.kanade.tachiyomi.ui.category.CategoriesTab
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -51,11 +49,9 @@ import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.mapAsCheckboxState
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.novel.repository.NovelCategoryRepository
-import tachiyomi.domain.entries.novel.model.Novel
 import tachiyomi.domain.entries.novel.model.NovelUpdate
 import tachiyomi.domain.entries.novel.repository.NovelRepository
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
-import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
 import tachiyomi.i18n.MR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
@@ -250,10 +246,9 @@ class NovelDetailScreenModel(
     private val sourceId: Long,
     private val novelUrl: String,
     private val novelTitle: String,
-    private val sourceManager: NovelSourceManager = Injekt.get(),
     private val novelRepository: NovelRepository = Injekt.get(),
-    private val chapterRepository: NovelChapterRepository = Injekt.get(),
     private val categoryRepository: NovelCategoryRepository = Injekt.get(),
+    private val loader: NovelEntryLoader = NovelEntryLoader(),
 ) : ScreenModel {
 
     private val _state = MutableStateFlow(State())
@@ -266,10 +261,6 @@ class NovelDetailScreenModel(
         load()
     }
 
-    /**
-     * Novels are persisted on first open with `favorite = false`, the way Mihon treats manga, so
-     * chapters always have a stable id for the reader to record progress against.
-     */
     fun refresh() {
         _state.update { it.copy(loading = true, error = null) }
         load()
@@ -278,24 +269,9 @@ class NovelDetailScreenModel(
     private fun load() {
         screenModelScope.launch {
             runCatching {
-                val source = sourceManager.get(sourceId) ?: error("Source $sourceId not available")
-                val novel = getOrInsertNovel()
+                val novel = loader.getOrInsert(sourceId, novelUrl, novelTitle)
                 novelId = novel.id
-
-                val details = source.getNovelDetails(novel.toSNovel())
-                novelRepository.updateNovel(
-                    NovelUpdate(
-                        id = novelId,
-                        author = details.author,
-                        description = details.description,
-                        genre = details.genre?.split(",")?.map(String::trim),
-                        status = details.status.toLong(),
-                        thumbnailUrl = details.thumbnail_url,
-                        initialized = true,
-                    ),
-                )
-
-                val chapters = syncChapters(source, details)
+                val (details, chapters) = loader.refresh(novel)
                 val info = NovelInfo(
                     cover = details.thumbnail_url,
                     author = details.author,
@@ -316,29 +292,6 @@ class NovelDetailScreenModel(
                 _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
             }
         }
-    }
-
-    private suspend fun getOrInsertNovel(): Novel {
-        novelRepository.getNovelByUrlAndSourceId(novelUrl, sourceId)?.let { return it }
-        val toInsert = Novel.create().copy(
-            source = sourceId,
-            url = novelUrl,
-            title = novelTitle,
-            dateAdded = System.currentTimeMillis(),
-        )
-        val id = novelRepository.insertNovel(toInsert) ?: error("Could not insert novel")
-        return toInsert.copy(id = id)
-    }
-
-    /** Brings the stored chapters in line with the source; read state survives (see [planChapterSync]). */
-    private suspend fun syncChapters(source: NovelSource, details: SNovel): List<NovelChapter> {
-        val remote = source.getChapterList(details)
-        val known = chapterRepository.getChapterByNovelId(novelId)
-        val plan = planChapterSync(novelId, remote, known, System.currentTimeMillis())
-        if (plan.toAdd.isNotEmpty()) chapterRepository.addAll(plan.toAdd)
-        if (plan.toUpdate.isNotEmpty()) chapterRepository.updateAll(plan.toUpdate)
-        if (plan.toRemove.isNotEmpty()) chapterRepository.removeChaptersWithIds(plan.toRemove)
-        return chapterRepository.getChapterByNovelId(novelId).sortedBy { it.sourceOrder }
     }
 
     private fun observeFavorite() {
@@ -398,11 +351,6 @@ class NovelDetailScreenModel(
 
     private suspend fun userCategories(): List<Category> =
         categoryRepository.getAllNovelCategories().filterNot(Category::isSystemCategory)
-
-    private fun Novel.toSNovel(): SNovel = SNovel.create().also {
-        it.url = url
-        it.title = title
-    }
 
     data class State(
         val loading: Boolean = true,

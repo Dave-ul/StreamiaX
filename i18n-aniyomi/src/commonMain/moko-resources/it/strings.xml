@@ -532,4 +532,7 @@
     <string name="novel_reader_text_settings">Impostazioni testo</string>
     <string name="novel_reader_font_size">Dimensione testo</string>
     <string name="novel_reader_line_height">Interlinea</string>
+    <string name="label_novel_sources">Fonti Novel</string>
+    <string name="label_novel_extensions">Estensioni Novel</string>
+    <string name="label_migration_novel">Migra Novel</string>
 </resources>

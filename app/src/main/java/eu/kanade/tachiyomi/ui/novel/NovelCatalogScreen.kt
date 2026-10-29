@@ -62,17 +62,26 @@ import uy.kohesive.injekt.api.get
 
 data class NovelUi(val url: String, val title: String, val author: String?, val cover: String?)
 
-/** Browses a single novel source, picked in [NovelSourcesScreen]. */
+/** Browses a single novel source, picked in Browse → Novel sources or from the global search. */
 class NovelCatalogScreen(
     private val sourceId: Long? = null,
+    private val latest: Boolean = false,
+    private val query: String? = null,
 ) : Screen() {
 
     @Composable
     override fun Content() {
         val navigator = LocalNavigator.currentOrThrow
-        val screenModel = rememberScreenModel { NovelCatalogScreenModel(sourceId) }
+        val screenModel = rememberScreenModel {
+            val listing = when {
+                !query.isNullOrBlank() -> Listing.Search(query)
+                latest -> Listing.Latest
+                else -> Listing.Popular
+            }
+            NovelCatalogScreenModel(sourceId, listing)
+        }
         val state by screenModel.state.collectAsState()
-        var query by remember { mutableStateOf("") }
+        var query by remember { mutableStateOf(this.query.orEmpty()) }
         val gridState = rememberLazyGridState()
 
         // Infinite scroll: ask for the next page when the last cell comes into view.
@@ -193,6 +202,7 @@ sealed interface Listing {
 
 class NovelCatalogScreenModel(
     requestedSourceId: Long?,
+    initialListing: Listing = Listing.Popular,
     private val sourceManager: NovelSourceManager = Injekt.get(),
 ) : ScreenModel {
 
@@ -201,7 +211,9 @@ class NovelCatalogScreenModel(
 
     val sourceId: Long = source.id
 
-    private val _state = MutableStateFlow(State(sourceName = source.name, supportsLatest = source.supportsLatest))
+    private val _state = MutableStateFlow(
+        State(sourceName = source.name, supportsLatest = source.supportsLatest, listing = initialListing),
+    )
     val state = _state.asStateFlow()
 
     private var nextPage = 1

@@ -1,6 +1,7 @@
 package eu.kanade.tachiyomi.ui.novel
 
 import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
+import tachiyomi.domain.items.chapter.service.ChapterRecognition
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
 
@@ -13,9 +14,12 @@ internal data class ChapterSyncPlan(
 /**
  * Diffs the source's chapter list against the stored one, matching by url: new chapters are
  * added, renamed or reordered ones updated (read state is kept), vanished ones removed.
+ * Chapter numbers the plugin leaves out are read from the name with Aniyomi's
+ * [ChapterRecognition], as the manga sync (SyncChaptersWithSource) and lnreader do.
  */
 internal fun planChapterSync(
     novelId: Long,
+    novelTitle: String,
     remote: List<SNovelChapter>,
     known: List<NovelChapter>,
     now: Long,
@@ -29,6 +33,11 @@ internal fun planChapterSync(
     val unique = remote.distinctBy { it.url }
     unique.forEachIndexed { index, chapter ->
         val order = index.toLong()
+        val number = ChapterRecognition.parseChapterNumber(
+            novelTitle,
+            chapter.name,
+            chapter.chapter_number.toDouble(),
+        )
         val existing = byUrl[chapter.url]
         if (existing == null) {
             toAdd += NovelChapter.create().copy(
@@ -36,12 +45,17 @@ internal fun planChapterSync(
                 url = chapter.url,
                 name = chapter.name,
                 dateUpload = chapter.date_upload,
-                chapterNumber = chapter.chapter_number.toDouble(),
+                chapterNumber = number,
                 sourceOrder = order,
                 dateFetch = now,
             )
-        } else if (existing.name != chapter.name || existing.sourceOrder != order) {
-            toUpdate += NovelChapterUpdate(id = existing.id, name = chapter.name, sourceOrder = order)
+        } else if (existing.name != chapter.name || existing.sourceOrder != order || existing.chapterNumber != number) {
+            toUpdate += NovelChapterUpdate(
+                id = existing.id,
+                name = chapter.name,
+                sourceOrder = order,
+                chapterNumber = number,
+            )
         }
     }
     val remoteUrls = unique.mapTo(HashSet()) { it.url }

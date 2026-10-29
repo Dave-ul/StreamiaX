@@ -10,7 +10,7 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.MenuBook
-import androidx.compose.material.icons.outlined.Explore
+import androidx.compose.material.icons.outlined.TravelExplore
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,7 +35,7 @@ import eu.kanade.presentation.entries.components.ItemCover
 import eu.kanade.presentation.library.components.LazyLibraryGrid
 import eu.kanade.presentation.library.components.LibraryTabs
 import eu.kanade.presentation.util.Tab
-import eu.kanade.tachiyomi.ui.novel.NovelSourcesScreen
+import eu.kanade.tachiyomi.ui.browse.novel.globalsearch.GlobalNovelSearchScreen
 import eu.kanade.tachiyomi.ui.novel.NovelDetailScreen
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.flow.SharingStarted
@@ -46,6 +46,7 @@ import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.novel.repository.NovelCategoryRepository
 import tachiyomi.domain.entries.novel.repository.NovelRepository
 import tachiyomi.domain.library.novel.LibraryNovel
+import tachiyomi.i18n.MR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.presentation.core.components.material.Scaffold
 import tachiyomi.presentation.core.i18n.stringResource
@@ -88,9 +89,9 @@ data object NovelLibraryTab : Tab {
                         AppBarActions(
                             actions = persistentListOf(
                                 AppBar.Action(
-                                    title = "Browse sources",
-                                    icon = Icons.Outlined.Explore,
-                                    onClick = { navigator.push(NovelSourcesScreen()) },
+                                    title = stringResource(MR.strings.action_global_search),
+                                    icon = Icons.Outlined.TravelExplore,
+                                    onClick = { navigator.push(GlobalNovelSearchScreen()) },
                                 ),
                             ),
                         )
