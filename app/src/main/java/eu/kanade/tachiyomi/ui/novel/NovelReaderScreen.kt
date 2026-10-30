@@ -42,7 +42,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -248,6 +247,7 @@ class NovelReaderScreen(
                             pages = pages,
                             onPagesChange = { pages = it },
                             onTurn = ::turn,
+                            onPositionShown = screenModel::onPositionShown,
                             onPosition = screenModel::savePosition,
                             onRead = screenModel::markRead,
                             onChapter = { navigator.replace(NovelReaderScreen(it)) },
@@ -258,6 +258,7 @@ class NovelReaderScreen(
                             sidePadding = sidePadding,
                             speaking = speaking,
                             listState = listState,
+                            onPositionShown = screenModel::onPositionShown,
                             onPosition = screenModel::savePosition,
                             onRead = screenModel::markRead,
                             onChapter = { navigator.replace(NovelReaderScreen(it)) },
@@ -311,7 +312,6 @@ class NovelReaderScreen(
 
     private companion object {
         const val SAVE_POSITION_DEBOUNCE_MS = 500L
-        const val NO_POSITION = -1
         const val PAGE_SCROLL_FRACTION = 0.85f
         val PARAGRAPH_GAP = 16.dp
     }
@@ -323,6 +323,7 @@ class NovelReaderScreen(
         sidePadding: Int,
         speaking: Int?,
         listState: LazyListState,
+        onPositionShown: (Int) -> Unit,
         onPosition: (Int) -> Unit,
         onRead: () -> Unit,
         onChapter: (Long) -> Unit,
@@ -333,20 +334,12 @@ class NovelReaderScreen(
                 listState.scrollToItem(state.savedParagraph.coerceAtMost(state.text.size))
             }
         }
-        val unsaved = remember { mutableIntStateOf(NO_POSITION) }
         LaunchedEffect(listState) {
             snapshotFlow { listState.firstVisibleItemIndex }
                 .drop(1)
-                .onEach { unsaved.intValue = it }
+                .onEach { onPositionShown(it) }
                 .debounce(SAVE_POSITION_DEBOUNCE_MS)
-                .collect {
-                    onPosition(it)
-                    unsaved.intValue = NO_POSITION
-                }
-        }
-        // Leaving within the debounce would drop the last scroll
-        DisposableEffect(listState) {
-            onDispose { unsaved.intValue.takeIf { it != NO_POSITION }?.let(onPosition) }
+                .collect(onPosition)
         }
         // The chapter counts as read once its end (the navigation row) scrolls into view.
         val reachedEnd by remember {
@@ -390,6 +383,7 @@ class NovelReaderScreen(
         pages: List<NovelPage>?,
         onPagesChange: (List<NovelPage>?) -> Unit,
         onTurn: (forward: Boolean) -> Unit,
+        onPositionShown: (Int) -> Unit,
         onPosition: (Int) -> Unit,
         onRead: () -> Unit,
         onChapter: (Long) -> Unit,
@@ -417,21 +411,15 @@ class NovelReaderScreen(
                 CircularProgressIndicator(Modifier.align(Alignment.Center))
                 return@BoxWithConstraints
             }
-            val unsaved = remember { mutableIntStateOf(NO_POSITION) }
             LaunchedEffect(pagerState, pages) {
                 snapshotFlow { pagerState.currentPage }
                     .drop(1)
-                    .onEach { page -> pages.getOrNull(page)?.let { unsaved.intValue = it.firstParagraph } }
+                    .onEach { page -> pages.getOrNull(page)?.let { onPositionShown(it.firstParagraph) } }
                     .debounce(SAVE_POSITION_DEBOUNCE_MS)
                     .collect { page ->
                         pages.getOrNull(page)?.let { onPosition(it.firstParagraph) }
-                        unsaved.intValue = NO_POSITION
                         if (pages.isNotEmpty() && page >= pages.lastIndex) onRead()
                     }
-            }
-            // Leaving within the debounce would drop the last page turn
-            DisposableEffect(pagerState) {
-                onDispose { unsaved.intValue.takeIf { it != NO_POSITION }?.let(onPosition) }
             }
             LaunchedEffect(speaking, pages) {
                 val index = speaking ?: return@LaunchedEffect

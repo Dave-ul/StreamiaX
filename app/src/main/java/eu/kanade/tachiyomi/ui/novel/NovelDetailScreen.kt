@@ -21,10 +21,12 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import cafe.adriel.voyager.core.model.ScreenModel
 import cafe.adriel.voyager.core.model.rememberScreenModel
@@ -38,17 +40,22 @@ import eu.kanade.presentation.entries.components.ItemCover
 import eu.kanade.presentation.util.Screen
 import eu.kanade.tachiyomi.novelsource.model.SNovel
 import eu.kanade.tachiyomi.ui.category.CategoriesTab
+import eu.kanade.tachiyomi.util.system.toast
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import logcat.LogPriority
 import tachiyomi.core.common.preference.CheckboxState
 import tachiyomi.core.common.preference.mapAsCheckboxState
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.category.model.Category
 import tachiyomi.domain.category.novel.repository.NovelCategoryRepository
 import tachiyomi.domain.entries.novel.model.NovelUpdate
@@ -71,6 +78,10 @@ class NovelDetailScreen(
         val navigator = LocalNavigator.currentOrThrow
         val screenModel = rememberScreenModel { NovelDetailScreenModel(sourceId, novelUrl, novelTitle) }
         val state by screenModel.state.collectAsState()
+        val context = LocalContext.current
+        LaunchedEffect(screenModel) {
+            screenModel.writeErrors.collect { context.toast(it) }
+        }
 
         Scaffold(
             topBar = {
@@ -264,6 +275,9 @@ class NovelDetailScreenModel(
     private var observingFavorite = false
     private var loadJob: Job? = null
 
+    private val _writeErrors = Channel<String>(Channel.BUFFERED)
+    val writeErrors = _writeErrors.receiveAsFlow()
+
     init {
         load()
     }
@@ -315,33 +329,32 @@ class NovelDetailScreenModel(
 
     fun toggleFavorite() {
         if (novelId == -1L) return
-        screenModelScope.launch {
+        write {
             if (_state.value.favorite) {
-                novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = false))
+                // Categories are cleared only once the novel has left the library
+                setFavorite(false)
                 novelRepository.setNovelCategories(novelId, emptyList())
-                return@launch
+                return@write
             }
             // Adding to the library: let the user pick categories first, as Mihon does.
-            if (userCategories().isEmpty()) {
-                novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = true))
-            } else {
-                showChangeCategoryDialog()
-            }
+            if (userCategories().isEmpty()) setFavorite(true) else loadCategoryDialog()
         }
     }
 
     fun showChangeCategoryDialog() {
         if (novelId == -1L) return
-        screenModelScope.launch {
-            val categories = userCategories()
-            val selected = categoryRepository.getCategoriesByNovelId(novelId).map { it.id }
-            _state.update {
-                it.copy(
-                    categoryDialogSelection = categories
-                        .mapAsCheckboxState { category -> category.id in selected }
-                        .toImmutableList(),
-                )
-            }
+        write { loadCategoryDialog() }
+    }
+
+    private suspend fun loadCategoryDialog() {
+        val categories = userCategories()
+        val selected = categoryRepository.getCategoriesByNovelId(novelId).map { it.id }
+        _state.update {
+            it.copy(
+                categoryDialogSelection = categories
+                    .mapAsCheckboxState { category -> category.id in selected }
+                    .toImmutableList(),
+            )
         }
     }
 
@@ -351,12 +364,31 @@ class NovelDetailScreenModel(
 
     fun setCategories(categoryIds: List<Long>) {
         if (novelId == -1L) return
-        screenModelScope.launch {
+        write {
             novelRepository.setNovelCategories(novelId, categoryIds)
-            if (!_state.value.favorite) {
-                novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = true))
-            }
+            if (!_state.value.favorite) setFavorite(true)
+            // Left open on failure, so the choice is not lost
             dismissCategoryDialog()
+        }
+    }
+
+    private suspend fun setFavorite(favorite: Boolean) {
+        check(novelRepository.updateNovel(NovelUpdate(id = novelId, favorite = favorite))) {
+            "Could not update the library"
+        }
+    }
+
+    /** Library writes: a failure is shown, not a crash, and the steps after it do not run. */
+    private fun write(block: suspend () -> Unit) {
+        screenModelScope.launch {
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Library change failed for novel $novelId" }
+                _writeErrors.send(e.message ?: e.toString())
+            }
         }
     }
 

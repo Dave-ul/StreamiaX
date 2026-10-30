@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import tachiyomi.data.handlers.novel.NovelDatabaseHandler
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
+import tachiyomi.domain.items.novelchapter.model.NovelChapterRemoteUpdate
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
 import tachiyomi.domain.items.novelchapter.model.NovelHistoryItem
 import tachiyomi.domain.items.novelchapter.repository.NovelChapterRepository
@@ -18,7 +19,7 @@ class NovelChapterRepositoryImpl(
     override suspend fun updateFromRemote(
         removedIds: List<Long>,
         added: List<NovelChapter>,
-        updated: List<NovelChapterUpdate>,
+        updated: List<NovelChapterRemoteUpdate>,
     ): List<NovelChapter> {
         return handler.await(inTransaction = true) {
             if (removedIds.isNotEmpty()) novel_chaptersQueries.removeChaptersWithIds(removedIds)
@@ -43,7 +44,16 @@ class NovelChapterRepositoryImpl(
                 )
                 chapter.copy(id = novel_chaptersQueries.selectLastInsertedRowId().executeAsOne())
             }
-            updated.forEach { updateChapter(it) }
+            updated.forEach {
+                updateChapter(
+                    NovelChapterUpdate(
+                        id = it.id,
+                        name = it.name,
+                        sourceOrder = it.sourceOrder,
+                        chapterNumber = it.chapterNumber,
+                    ),
+                )
+            }
             stored
         }
     }

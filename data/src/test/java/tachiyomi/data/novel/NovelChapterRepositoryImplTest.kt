@@ -8,7 +8,7 @@ import org.junit.jupiter.api.assertThrows
 import tachiyomi.data.handlers.novel.NovelDatabaseHandler
 import tachiyomi.data.items.novelchapter.NovelChapterRepositoryImpl
 import tachiyomi.domain.items.novelchapter.model.NovelChapter
-import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
+import tachiyomi.domain.items.novelchapter.model.NovelChapterRemoteUpdate
 import tachiyomi.novel.data.NovelDatabase
 import java.sql.SQLException
 
@@ -25,13 +25,13 @@ class NovelChapterRepositoryImplTest {
         val added = repository.updateFromRemote(
             removedIds = listOf(1),
             added = listOf(chapter(1, "kept"), chapter(1, "new")),
-            updated = listOf(NovelChapterUpdate(id = 2, read = true)),
+            updated = listOf(NovelChapterRemoteUpdate(id = 2, name = "renamed", sourceOrder = 0, chapterNumber = 1.0)),
         )
 
         assertEquals(listOf("new"), added.map { it.url })
         assertEquals(
-            listOf("kept" to true, "new" to false),
-            repository.getChapterByNovelId(1).sortedBy { it.id }.map { it.url to it.read },
+            listOf("kept" to "renamed", "new" to "new"),
+            repository.getChapterByNovelId(1).sortedBy { it.id }.map { it.url to it.name },
         )
     }
 

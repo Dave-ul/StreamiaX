@@ -45,6 +45,19 @@ internal fun SqlDriver.longRows(sql: String, columns: Int): List<List<Long?>> =
         parameters = 0,
     ).value
 
+/** Rows of a query read as text, for names and schema statements. */
+internal fun SqlDriver.stringRows(sql: String, columns: Int): List<List<String?>> =
+    executeQuery(
+        identifier = null,
+        sql = sql,
+        mapper = { cursor ->
+            val rows = mutableListOf<List<String?>>()
+            while (cursor.next().value) rows += (0 until columns).map { cursor.getString(it) }
+            QueryResult.Value(rows)
+        },
+        parameters = 0,
+    ).value
+
 internal fun novelRow(id: Long, url: String, favorite: Int = 0, author: String? = null, dateAdded: Long = 0): String {
     val authorValue = author?.let { "'$it'" } ?: "NULL"
     return "INSERT INTO novels(_id, source, url, author, title, status, favorite, initialized, reader_flags, " +

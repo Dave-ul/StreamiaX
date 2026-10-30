@@ -59,7 +59,8 @@ class NovelMigrator(
 }
 
 /**
- * Chapters match by number when both sides know it, otherwise by name. Like Mihon, everything up
+ * Chapters match by number when both sides know it and an old chapter has that number, otherwise
+ * by normalized name. Like Mihon, everything up
  * to the highest read number is read too, so a source that splits chapters differently still
  * resumes in the right place.
  */

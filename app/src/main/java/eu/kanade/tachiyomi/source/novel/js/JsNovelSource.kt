@@ -16,6 +16,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.put
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import java.io.File
 import java.time.Instant
 import java.time.LocalDate
@@ -129,14 +131,22 @@ class JsNovelSource(
         var page = if (chapters.isEmpty()) 1 else 2
         val maxPages = totalPages ?: MAX_GUESSED_PAGES
         while (page <= maxPages) {
-            // A failed page fails the whole list: a list cut short would make the sync delete the
-            // chapters after it, with their read state and history.
-            val got = JSON.decodeFromJsonElement<SourcePage>(
-                rt.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())),
-            ).chapters
+            val got = try {
+                JSON.decodeFromJsonElement<SourcePage>(
+                    rt.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())),
+                ).chapters
+            } catch (e: Exception) {
+                // With a known page count a failed page fails the whole list: a list cut short would
+                // make the sync delete the chapters after it, with their read state and history.
+                // When guessing, many plugins throw past the last page, so that ends the list.
+                if (totalPages != null || page == 1) throw e
+                logcat(LogPriority.WARN, e) { "${plugin.name}: stopped guessing pages at $page" }
+                break
+            }
             if (got.isEmpty()) break
             chapters += got
-            if (totalPages == null && got.size < 5) break
+            // Without a page count, a short page is taken to be the last one
+            if (totalPages == null && got.size < MIN_FULL_PAGE) break
             page++
         }
         return novel.copy(chapters = chapters)
@@ -172,6 +182,7 @@ class JsNovelSource(
 
     private companion object {
         const val MAX_GUESSED_PAGES = 50
+        const val MIN_FULL_PAGE = 5
 
         val JSON = Json {
             ignoreUnknownKeys = true
