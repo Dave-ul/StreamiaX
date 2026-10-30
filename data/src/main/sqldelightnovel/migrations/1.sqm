@@ -22,10 +22,21 @@ OR category_id NOT IN (SELECT _id FROM categories);
 
 -- Copies of the same source entry: the one in the library is kept, else the oldest. It takes each
 -- detail it is missing from the oldest copy that has it, and everything attached to the others.
-CREATE TEMP TABLE duplicate_novels AS
+-- The temp tables declare their columns: SQLDelight 2.0.2 loses the column aliases of CREATE TABLE ... AS SELECT.
+CREATE TEMP TABLE duplicate_novels(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    keep_id INTEGER NOT NULL
+);
+
+INSERT INTO duplicate_novels(_id, keep_id)
 SELECT
     _id,
-    first_value(_id) OVER (PARTITION BY source, url ORDER BY favorite DESC, _id ASC) AS keep_id
+    (
+        SELECT N2._id FROM novels N2
+        WHERE N2.source = novels.source AND N2.url = novels.url
+        ORDER BY N2.favorite DESC, N2._id ASC
+        LIMIT 1
+    )
 FROM novels
 WHERE (source, url) IN (
     SELECT source, url
@@ -93,23 +104,26 @@ DROP TABLE duplicate_novels;
 -- Moving the chapters above brings copies of the same chapter together, on top of the ones two
 -- concurrent refreshes could insert. The copy with reading history is kept, else the oldest, and the
 -- read state and history of the others are merged into it.
-CREATE TEMP TABLE duplicate_chapters AS
+CREATE TEMP TABLE duplicate_chapters(
+    _id INTEGER NOT NULL PRIMARY KEY,
+    keep_id INTEGER NOT NULL
+);
+
+INSERT INTO duplicate_chapters(_id, keep_id)
 SELECT
     _id,
-    first_value(_id) OVER (PARTITION BY novel_id, url ORDER BY has_history DESC, _id ASC) AS keep_id
-FROM (
-    SELECT
-        _id,
-        novel_id,
-        url,
-        EXISTS(SELECT 1 FROM novelhistory H WHERE H.chapter_id = novel_chapters._id) AS has_history
-    FROM novel_chapters
-    WHERE (novel_id, url) IN (
-        SELECT novel_id, url
-        FROM novel_chapters
-        GROUP BY novel_id, url
-        HAVING count(*) > 1
+    (
+        SELECT C2._id FROM novel_chapters C2
+        WHERE C2.novel_id = novel_chapters.novel_id AND C2.url = novel_chapters.url
+        ORDER BY EXISTS(SELECT 1 FROM novelhistory H WHERE H.chapter_id = C2._id) DESC, C2._id ASC
+        LIMIT 1
     )
+FROM novel_chapters
+WHERE (novel_id, url) IN (
+    SELECT novel_id, url
+    FROM novel_chapters
+    GROUP BY novel_id, url
+    HAVING count(*) > 1
 );
 
 UPDATE novel_chapters
