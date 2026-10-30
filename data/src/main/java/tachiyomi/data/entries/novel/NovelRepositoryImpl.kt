@@ -70,7 +70,8 @@ class NovelRepositoryImpl(
     override suspend fun setNovelCategories(novelId: Long, categoryIds: List<Long>) {
         handler.await(inTransaction = true) {
             novels_categoriesQueries.deleteNovelCategoryByNovelId(novelId)
-            categoryIds.forEach { categoryId ->
+            // A novel is in each category once (novels_categories_unique)
+            categoryIds.distinct().forEach { categoryId ->
                 novels_categoriesQueries.insert(novelId, categoryId)
             }
         }

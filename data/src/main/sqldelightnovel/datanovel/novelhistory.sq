@@ -56,13 +56,16 @@ JOIN novel_chapters C
 ON H.chapter_id = C._id
 JOIN novels N
 ON C.novel_id = N._id
-WHERE H.last_read > 0
-AND H.last_read = (
-    SELECT max(H2.last_read)
+WHERE H._id = (
+    -- Exactly one row per novel: two chapters read at the same instant would both match a max().
+    SELECT H2._id
     FROM novelhistory H2
     JOIN novel_chapters C2
     ON H2.chapter_id = C2._id
     WHERE C2.novel_id = N._id
+    AND H2.last_read > 0
+    ORDER BY H2.last_read DESC, H2._id DESC
+    LIMIT 1
 )
 ORDER BY H.last_read DESC;
 

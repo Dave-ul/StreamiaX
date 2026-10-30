@@ -18,6 +18,8 @@ CREATE TABLE novel_chapters(
 
 CREATE INDEX novel_chapters_novel_id_index ON novel_chapters(novel_id);
 CREATE INDEX novel_chapters_unread_by_novel_index ON novel_chapters(novel_id, read) WHERE read = 0;
+-- One row per chapter of a novel, as Mihon's chapter table (UNIQUE(manga_id, remote_url)).
+CREATE UNIQUE INDEX novel_chapters_novel_url_unique ON novel_chapters(novel_id, url);
 
 getChapterById:
 SELECT *

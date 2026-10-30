@@ -27,6 +27,8 @@ CREATE TABLE novels(
 
 CREATE INDEX novellibrary_favorite_index ON novels(favorite) WHERE favorite = 1;
 CREATE INDEX novels_url_index ON novels(url);
+-- One row per source entry, as Mihon's manga table (UNIQUE(source_id, remote_url)).
+CREATE UNIQUE INDEX novels_source_url_unique ON novels(source, url);
 
 getNovelById:
 SELECT *

@@ -82,6 +82,7 @@ import kotlinx.collections.immutable.persistentListOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import tachiyomi.i18n.MR
@@ -246,6 +247,7 @@ class NovelReaderScreen(
                             pages = pages,
                             onPagesChange = { pages = it },
                             onTurn = ::turn,
+                            onPositionShown = screenModel::onPositionShown,
                             onPosition = screenModel::savePosition,
                             onRead = screenModel::markRead,
                             onChapter = { navigator.replace(NovelReaderScreen(it)) },
@@ -256,6 +258,7 @@ class NovelReaderScreen(
                             sidePadding = sidePadding,
                             speaking = speaking,
                             listState = listState,
+                            onPositionShown = screenModel::onPositionShown,
                             onPosition = screenModel::savePosition,
                             onRead = screenModel::markRead,
                             onChapter = { navigator.replace(NovelReaderScreen(it)) },
@@ -320,6 +323,7 @@ class NovelReaderScreen(
         sidePadding: Int,
         speaking: Int?,
         listState: LazyListState,
+        onPositionShown: (Int) -> Unit,
         onPosition: (Int) -> Unit,
         onRead: () -> Unit,
         onChapter: (Long) -> Unit,
@@ -333,6 +337,7 @@ class NovelReaderScreen(
         LaunchedEffect(listState) {
             snapshotFlow { listState.firstVisibleItemIndex }
                 .drop(1)
+                .onEach { onPositionShown(it) }
                 .debounce(SAVE_POSITION_DEBOUNCE_MS)
                 .collect(onPosition)
         }
@@ -378,6 +383,7 @@ class NovelReaderScreen(
         pages: List<NovelPage>?,
         onPagesChange: (List<NovelPage>?) -> Unit,
         onTurn: (forward: Boolean) -> Unit,
+        onPositionShown: (Int) -> Unit,
         onPosition: (Int) -> Unit,
         onRead: () -> Unit,
         onChapter: (Long) -> Unit,
@@ -408,6 +414,7 @@ class NovelReaderScreen(
             LaunchedEffect(pagerState, pages) {
                 snapshotFlow { pagerState.currentPage }
                     .drop(1)
+                    .onEach { page -> pages.getOrNull(page)?.let { onPositionShown(it.firstParagraph) } }
                     .debounce(SAVE_POSITION_DEBOUNCE_MS)
                     .collect { page ->
                         pages.getOrNull(page)?.let { onPosition(it.firstParagraph) }

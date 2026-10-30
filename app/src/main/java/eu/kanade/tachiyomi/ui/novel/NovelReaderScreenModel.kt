@@ -12,7 +12,6 @@ import eu.kanade.tachiyomi.ui.novel.reader.NovelTranslator
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.DelicateCoroutinesApi
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,6 +21,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import logcat.LogPriority
+import tachiyomi.core.common.util.lang.launchIO
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.domain.entries.novel.repository.NovelRepository
 import tachiyomi.domain.items.novelchapter.model.NovelChapterUpdate
@@ -59,6 +59,9 @@ class NovelReaderScreenModel(
 
     private var translateJob: Job? = null
 
+    /** See [onPositionShown]. */
+    private var shownParagraph: Int? = null
+
     init {
         load()
     }
@@ -79,6 +82,8 @@ class NovelReaderScreenModel(
                     },
                 )
                 val paragraphs = withContext(Dispatchers.Default) { htmlToParagraphs(html) }
+                // A blank chapter is a broken page: shown as an error, so it is never marked read.
+                check(paragraphs.isNotEmpty()) { "${source.name} returned no text for ${chapter.name}" }
                 val siblings = chapterRepository.getChapterByNovelId(chapter.novelId).sortedBy { it.sourceOrder }
                 val index = siblings.indexOfFirst { it.id == chapterId }
                 _state.update {
@@ -92,12 +97,14 @@ class NovelReaderScreenModel(
                         nextChapterId = siblings.getOrNull(index + 1)?.id,
                     )
                 }
-                // Shows up in History right away; the reading time is added when leaving.
-                chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = 0)
             }.onFailure { e ->
+                if (e is CancellationException) throw e
                 _state.update { it.copy(loading = false, error = e.message ?: "unknown") }
                 return@launch
             }
+            // Shows up in History right away; the reading time is added when leaving. Outside the
+            // load above: a failed history write must not hide a chapter that loaded fine.
+            persist("history") { chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = 0) }
             if (preferences.translate().get()) {
                 translateJob = launchTranslation()
                 translateJob?.join()
@@ -107,17 +114,36 @@ class NovelReaderScreenModel(
         }
     }
 
+    /**
+     * The paragraph on screen, reported on every scroll or page turn. [savePosition] only follows
+     * after a debounce, so leaving within it would lose the last move: [onDispose] writes this one.
+     */
+    fun onPositionShown(paragraph: Int) {
+        shownParagraph = paragraph
+    }
+
     fun savePosition(paragraph: Int) {
         // Kept in state too, so switching between scrolling and pages returns to this spot.
         _state.update { it.copy(savedParagraph = paragraph) }
-        screenModelScope.launch {
+        persist("position") {
             chapterRepository.update(NovelChapterUpdate(id = chapterId, lastPosition = paragraph.toLong()))
         }
     }
 
     fun markRead() {
+        persist("read state") { chapterRepository.update(NovelChapterUpdate(id = chapterId, read = true)) }
+    }
+
+    /** Progress writes: a database error is logged rather than crashing the reader. */
+    private fun persist(what: String, block: suspend () -> Unit) {
         screenModelScope.launch {
-            chapterRepository.update(NovelChapterUpdate(id = chapterId, read = true))
+            try {
+                block()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Could not save the $what of chapter $chapterId" }
+            }
         }
     }
 
@@ -179,8 +205,15 @@ class NovelReaderScreenModel(
     private fun onSpeechChapterEnd() {
         val next = _state.value.nextChapterId?.takeIf { preferences.speechNextChapter().get() }
         screenModelScope.launch {
-            // Written before moving on: leaving the screen cancels this scope.
-            chapterRepository.update(NovelChapterUpdate(id = chapterId, read = true))
+            // Written before moving on: leaving the screen cancels this scope. Speech goes on to the
+            // next chapter even if the write fails.
+            try {
+                chapterRepository.update(NovelChapterUpdate(id = chapterId, read = true))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Could not mark chapter $chapterId read" }
+            }
             next?.let { _speakNext.send(it) }
         }
     }
@@ -188,11 +221,17 @@ class NovelReaderScreenModel(
     @OptIn(DelicateCoroutinesApi::class)
     override fun onDispose() {
         speech.shutdown()
-        if (_state.value.loading || _state.value.error != null) return
+        val state = _state.value
+        if (state.loading || state.error != null) return
         val duration = System.currentTimeMillis() - openedAt
-        // screenModelScope is being cancelled, so the last write goes through a global scope.
-        GlobalScope.launch(Dispatchers.IO) {
-            chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = duration)
+        val position = (shownParagraph ?: state.savedParagraph).toLong()
+        // screenModelScope is being cancelled, so the last writes go through GlobalScope (launchIO).
+        // Each write is tried on its own: a failed position must not cost the reading time.
+        launchIO {
+            runCatching { chapterRepository.update(NovelChapterUpdate(id = chapterId, lastPosition = position)) }
+                .onFailure { logcat(LogPriority.ERROR, it) { "Could not save the position of chapter $chapterId" } }
+            runCatching { chapterRepository.upsertHistory(chapterId, readAt = Date(), sessionReadDuration = duration) }
+                .onFailure { logcat(LogPriority.ERROR, it) { "Could not save the history of chapter $chapterId" } }
         }
     }
 
