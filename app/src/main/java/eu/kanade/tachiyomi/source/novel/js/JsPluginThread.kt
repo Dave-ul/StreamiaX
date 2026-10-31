@@ -170,15 +170,13 @@ class JsPluginThread<R : JsPluginThread.Runtime>(
         private fun <T> runCall(call: Call<T>) {
             idleClose?.cancel(false)
             if (start(call)) {
-                call.result.completeWith(
-                    runCatching {
-                        val runtime = runtime ?: create().also { runtime = it }
-                        runtime.begin()
-                        // A cancel that came while the runtime was created found nothing to cancel
-                        if (call.cancelled) throw CancellationException("$name: call cancelled")
-                        call.block(runtime)
-                    },
-                )
+                runCatching {
+                    val runtime = runtime ?: create().also { runtime = it }
+                    runtime.begin()
+                    // A cancel that came while the runtime was created found nothing to cancel
+                    if (call.cancelled) throw CancellationException("$name: call cancelled")
+                    call.block(runtime)
+                }.fold(call.result::complete, call.result::completeExceptionally)
                 synchronized(lock) { current = null }
             }
             scheduleIdleClose()
