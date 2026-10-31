@@ -36,7 +36,10 @@ class PublicAddressInterceptorTest {
     @Test
     fun `inside ip literals are spotted in every numeric form, host names are left to dns`() {
         val inside = listOf(
-            "http://127.0.0.1:8090/", "http://[::1]/", "http://2130706433/", "http://192.168.1.1/",
+            "http://127.0.0.1:8090/",
+            "http://[::1]/",
+            "http://2130706433/",
+            "http://192.168.1.1/",
             "http://10.0.0.1.5/",
         )
         val outside = listOf("https://8.8.8.8/", "https://[2606:4700::1111]/", "https://localhost.example/")
