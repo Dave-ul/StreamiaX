@@ -1,5 +1,6 @@
 package eu.kanade.tachiyomi.source.novel.js
 
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -71,7 +72,8 @@ class JsPluginThreadTest {
         val thread = thread()
         val started = CountDownLatch(1)
         val release = CountDownLatch(1)
-        val call = async {
+        // Undispatched: runBlocking's only thread blocks on started.await() right after
+        val call = async(start = CoroutineStart.UNDISPATCHED) {
             thread.run {
                 started.countDown()
                 release.await()

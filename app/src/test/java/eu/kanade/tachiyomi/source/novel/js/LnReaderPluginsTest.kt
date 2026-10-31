@@ -43,9 +43,11 @@ class LnReaderPluginsTest {
     @Test
     fun `a failed download leaves the installed plugin untouched`() = runTest {
         plugins.install(plugin("a"))
+        // plugin() puts the code back for a missing url, so the update is made before removing it
+        val update = plugin("a", version = "2.0.0")
         files.remove(url("a"))
 
-        assertThrows<IOException> { plugins.install(plugin("a", version = "2.0.0")) }
+        assertThrows<IOException> { plugins.install(update) }
 
         assertEquals(listOf("1.0.0"), plugins.installed().map { it.version })
         assertEquals("code of a", File(dir, "a.js").readText())
