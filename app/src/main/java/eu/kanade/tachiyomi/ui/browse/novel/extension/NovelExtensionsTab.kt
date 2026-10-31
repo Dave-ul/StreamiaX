@@ -25,10 +25,13 @@ import eu.kanade.presentation.components.TabContent
 import eu.kanade.tachiyomi.source.novel.NovelSourceManager
 import eu.kanade.tachiyomi.source.novel.js.JsNovelSource
 import eu.kanade.tachiyomi.source.novel.js.LnReaderPlugin
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import logcat.LogPriority
+import tachiyomi.core.common.util.system.logcat
 import tachiyomi.i18n.MR
 import tachiyomi.i18n.aniyomi.AYMR
 import tachiyomi.presentation.core.components.ScrollbarLazyColumn
@@ -194,7 +197,16 @@ class NovelExtensionsScreenModel(
     }
 
     fun uninstall(source: JsNovelSource) {
-        sourceManager.uninstallPlugin(source)
+        screenModelScope.launch {
+            try {
+                sourceManager.uninstallPlugin(source)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                logcat(LogPriority.ERROR, e) { "Uninstall of ${source.name} failed" }
+                _state.update { it.copy(message = "${source.name}: ${e.message ?: "uninstall failed"}") }
+            }
+        }
     }
 
     data class State(

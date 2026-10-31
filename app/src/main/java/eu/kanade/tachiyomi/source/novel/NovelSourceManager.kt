@@ -14,6 +14,7 @@ import kotlinx.coroutines.launch
 import logcat.LogPriority
 import tachiyomi.core.common.util.system.logcat
 import tachiyomi.data.handlers.novel.NovelDatabaseHandler
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -31,7 +32,7 @@ class NovelSourceManager(
     val plugins = LnReaderPlugins()
 
     private val sourcesMap = ConcurrentHashMap<Long, NovelSource>(
-        (builtInSources() + plugins.installed().map(plugins::source)).associateBy { it.id },
+        (builtInSources() + installedPlugins().map(plugins::source)).associateBy { it.id },
     )
 
     private val _sources = MutableStateFlow(sourcesMap.values.toList())
@@ -52,17 +53,26 @@ class NovelSourceManager(
 
     /** Installs or updates [plugin] and makes it available as a source right away. */
     suspend fun installPlugin(plugin: LnReaderPlugin) {
-        val source = plugins.install(plugin)
+        plugins.install(plugin)
+        val source = plugins.source(plugin)
         (sourcesMap.put(source.id, source) as? JsNovelSource)?.close()
         _sources.value = sourcesMap.values.toList()
         registerSources(listOf(source))
     }
 
-    fun uninstallPlugin(source: JsNovelSource) {
+    suspend fun uninstallPlugin(source: JsNovelSource) {
         plugins.uninstall(source.plugin.id)
         sourcesMap.remove(source.id)
         source.close()
         _sources.value = sourcesMap.values.toList()
+    }
+
+    /** At startup a read error must not stop the app: the plugins come back on the next start. */
+    private fun installedPlugins(): List<LnReaderPlugin> = try {
+        plugins.installed()
+    } catch (e: IOException) {
+        logcat(LogPriority.ERROR, e) { "Installed lnreader plugins could not be read" }
+        emptyList()
     }
 
     private suspend fun registerSources(sources: Collection<NovelSource>) {
