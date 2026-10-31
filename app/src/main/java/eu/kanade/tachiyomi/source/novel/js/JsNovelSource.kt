@@ -4,10 +4,7 @@ import eu.kanade.tachiyomi.novelsource.model.NovelsPage
 import eu.kanade.tachiyomi.novelsource.model.SNovel
 import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
 import eu.kanade.tachiyomi.novelsource.online.NovelHttpSource
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.asCoroutineDispatcher
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -24,7 +21,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
-import java.util.concurrent.Executors
 
 /**
  * A [eu.kanade.tachiyomi.novelsource.NovelSource] backed by an installed lnreader JS plugin.
@@ -44,40 +40,39 @@ class JsNovelSource(
     override val supportsLatest = true
     override val id by lazy { generateId(plugin.id, "lnreader", 1) }
 
-    // Only touched on jsDispatcher.
-    private var runtime: JsNovelRuntime? = null
+    private val thread = JsPluginThread(plugin.id, JS_TIMEOUT_MS, IDLE_MS) {
+        JsNovelRuntime(plugin.id, codeFile.readText())
+    }
+
+    @Volatile
     private var lastNovel: SourceNovel? = null
 
-    private suspend fun <T> js(block: (JsNovelRuntime) -> T): T = withContext(jsDispatcher) {
-        val rt = runtime ?: JsNovelRuntime(plugin.id, codeFile.readText()).also { runtime = it }
-        block(rt)
-    }
+    private val pages = RepeatedPageGuard()
 
-    /** Frees the QuickJS instance, e.g. after the plugin is updated or uninstalled. */
+    private suspend fun <T> js(block: (JsNovelRuntime) -> T): T = thread.run(block)
+
+    /** Frees the plugin thread and its QuickJS instance, e.g. after the plugin is updated or uninstalled. */
     fun close() {
-        CoroutineScope(jsDispatcher).launch {
-            runtime?.close()
-            runtime = null
-            lastNovel = null
-        }
+        thread.close()
+        lastNovel = null
     }
 
-    override suspend fun getPopularNovels(page: Int) = novels("popularNovels", page, latest = false)
+    override suspend fun getPopularNovels(page: Int) = novels(page, latest = false)
 
-    override suspend fun getLatestUpdates(page: Int) = novels("popularNovels", page, latest = true)
+    override suspend fun getLatestUpdates(page: Int) = novels(page, latest = true)
 
     override suspend fun getSearchNovels(page: Int, query: String): NovelsPage {
         val items = js { it.call("searchNovels", JsonPrimitive(query), JsonPrimitive(page)) }
-        return toPage(items)
+        return toPage("search:$query", page, items)
     }
 
-    private suspend fun novels(method: String, page: Int, latest: Boolean): NovelsPage {
+    private suspend fun novels(page: Int, latest: Boolean): NovelsPage {
         val options = buildJsonObject { put("showLatestNovels", latest) }
-        return toPage(js { it.call(method, JsonPrimitive(page), options) })
+        return toPage("popular:$latest", page, js { it.call("popularNovels", JsonPrimitive(page), options) })
     }
 
-    // ponytail: lnreader has no hasNextPage, so any non-empty page means "try the next one".
-    private fun toPage(items: JsonElement): NovelsPage {
+    /** lnreader has no hasNextPage, so any non-empty page that is not a repeat means "try the next one". */
+    private fun toPage(listing: String, page: Int, items: JsonElement): NovelsPage {
         val novels = JSON.decodeFromJsonElement<List<NovelItem>>(items).map { item ->
             SNovel.create().apply {
                 url = item.path
@@ -85,11 +80,12 @@ class JsNovelSource(
                 thumbnail_url = item.cover
             }
         }
+        if (pages.isRepeat(listing, page, novels.map { it.url })) return NovelsPage(emptyList(), hasNextPage = false)
         return NovelsPage(novels, hasNextPage = novels.isNotEmpty())
     }
 
     override suspend fun getNovelDetails(novel: SNovel): SNovel {
-        val parsed = js { rt -> parseNovel(rt, novel.url).also { lastNovel = it } }
+        val parsed = parseNovel(novel.url).also { lastNovel = it }
         return SNovel.create().apply {
             url = novel.url
             title = parsed.name.ifBlank { novel.title }
@@ -105,9 +101,7 @@ class JsNovelSource(
 
     /** Reuses the parseNovel result of the [getNovelDetails] call that normally comes right before. */
     override suspend fun getChapterList(novel: SNovel): List<SNovelChapter> {
-        val parsed = js { rt ->
-            lastNovel?.takeIf { it.path == novel.url }.also { lastNovel = null } ?: parseNovel(rt, novel.url)
-        }
+        val parsed = lastNovel?.takeIf { it.path == novel.url }.also { lastNovel = null } ?: parseNovel(novel.url)
         return parsed.chapters.map { chapter ->
             SNovelChapter.create().apply {
                 url = chapter.path
@@ -121,8 +115,9 @@ class JsNovelSource(
     override suspend fun getChapterText(chapter: SNovelChapter): String =
         (js { it.call("parseChapter", JsonPrimitive(chapter.url)) } as? JsonPrimitive)?.contentOrNull.orEmpty()
 
-    private fun parseNovel(rt: JsNovelRuntime, path: String): SourceNovel {
-        val novel = JSON.decodeFromJsonElement<SourceNovel>(rt.call("parseNovel", JsonPrimitive(path)))
+    /** One JS call per page, so each gets the whole timeout. */
+    private suspend fun parseNovel(path: String): SourceNovel {
+        val novel = JSON.decodeFromJsonElement<SourceNovel>(js { it.call("parseNovel", JsonPrimitive(path)) })
             .let { it.copy(path = it.path.ifBlank { path }) }
         val totalPages = novel.totalPages
         if (novel.chapters.isNotEmpty() && (totalPages == null || totalPages <= 1)) return novel
@@ -133,8 +128,13 @@ class JsNovelSource(
         while (page <= maxPages) {
             val got = try {
                 JSON.decodeFromJsonElement<SourcePage>(
-                    rt.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())),
+                    js { it.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())) },
                 ).chapters
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: JsTimeoutException) {
+                // A slow site, not the end of the list
+                throw e
             } catch (e: Exception) {
                 // With a known page count a failed page fails the whole list: a list cut short would
                 // make the sync delete the chapters after it, with their read state and history.
@@ -191,9 +191,11 @@ class JsNovelSource(
             explicitNulls = false
         }
 
-        // ponytail: one JS thread for every plugin; per-plugin threads if parallel browsing matters.
-        val jsDispatcher = Executors.newSingleThreadExecutor { Thread(it, "lnreader-js") }
-            .asCoroutineDispatcher()
+        /** A few seconds over the runtime's own limit, which normally fails the call first. */
+        const val JS_TIMEOUT_MS = 65_000L
+
+        /** A runtime holds the parsed libs.js; one unused for this long is freed. */
+        const val IDLE_MS = 5 * 60_000L
 
         fun String?.toSNovelStatus() = when (this) {
             "Ongoing" -> SNovel.ONGOING

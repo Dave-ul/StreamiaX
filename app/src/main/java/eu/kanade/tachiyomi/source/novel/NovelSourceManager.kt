@@ -52,13 +52,14 @@ class NovelSourceManager(
 
     /** Installs or updates [plugin] and makes it available as a source right away. */
     suspend fun installPlugin(plugin: LnReaderPlugin) {
-        val source = plugins.install(plugin)
+        plugins.install(plugin)
+        val source = plugins.source(plugin)
         (sourcesMap.put(source.id, source) as? JsNovelSource)?.close()
         _sources.value = sourcesMap.values.toList()
         registerSources(listOf(source))
     }
 
-    fun uninstallPlugin(source: JsNovelSource) {
+    suspend fun uninstallPlugin(source: JsNovelSource) {
         plugins.uninstall(source.plugin.id)
         sourcesMap.remove(source.id)
         source.close()

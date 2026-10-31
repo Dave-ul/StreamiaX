@@ -3,8 +3,8 @@
  *
  * Native side is the `__native` object bound by JsNovelRuntime.kt. Everything native is
  * synchronous; async plugin code still works because Promise below runs on a JS job queue that
- * __drain() empties. The bundled quickjs-android never runs its own pending-job queue, so native
- * Promise callbacks would never fire.
+ * drain() empties. quickjs-android 0.9.2 never runs its own pending-job queue, so native Promise
+ * callbacks would never fire. Drop this Promise once the engine runs that queue itself.
  *
  * The require() table, @libs constants and the storage fallback to pluginSettings defaults are
  * adapted from mangayomi (lib/eval/lnreader, Apache-2.0, https://github.com/kodjodevf/mangayomi);
@@ -157,16 +157,24 @@
   g.setInterval = function () { throw new Error('setInterval is not supported'); };
   g.clearInterval = function () {};
 
-  /** Runs queued jobs, then due timers, until [isDone] says the caller has its answer. */
-  function drain(isDone) {
+  /**
+   * Runs queued jobs, then due timers, until [isDone] says the caller has its answer or the
+   * [deadline] (epoch millis) passes. A plugin that keeps rescheduling timers stops there.
+   */
+  function drain(isDone, deadline) {
     for (;;) {
-      for (var i = 0; i < jobs.length; i++) jobs[i]();
+      for (var i = 0; i < jobs.length; i++) {
+        // Promise chains that never end are checked too, every 1024 jobs
+        if ((i & 1023) === 1023 && Date.now() >= deadline) break;
+        jobs[i]();
+      }
       jobs.length = 0;
-      if (isDone() || !timers.length) return;
+      if (isDone() || !timers.length || Date.now() >= deadline) return;
       timers.sort(function (a, b) { return a.at - b.at || a.id - b.id; });
       var t = timers.shift();
-      var wait = t.at - Date.now();
+      var wait = Math.min(t.at, deadline) - Date.now();
       if (wait > 0) __native.sleep(Math.min(wait, 5000));
+      if (Date.now() >= deadline) return;
       t.fn.apply(null, t.args);
     }
   }
@@ -386,18 +394,18 @@
   /** The plugin being loaded or called; storage reads its pluginSettings defaults lazily. */
   var current = { id: '', plugin: null };
 
-  function makeStorage(pluginId) {
-    var prefix = pluginId + '_DB_';
+  /** The native side keeps each plugin's keys apart, so keys here are the plugin's own. */
+  function makeStorage() {
     var storage = {
       set: function (key, value, expires) {
-        __native.storageSet(prefix + key, JSON.stringify({
+        __native.storageSet(String(key), JSON.stringify({
           created: new Date(),
           value: value,
           expires: expires instanceof Date ? expires.getTime() : expires,
         }));
       },
       get: function (key, raw) {
-        var stored = __native.storageGet(prefix + key);
+        var stored = __native.storageGet(String(key));
         if (stored) {
           var item = JSON.parse(stored);
           if (item.expires && Date.now() > item.expires) {
@@ -413,8 +421,8 @@
         }
         return undefined;
       },
-      'delete': function (key) { __native.storageDelete(prefix + key); },
-      getAllKeys: function () { return JSON.parse(__native.storageKeys(prefix)); },
+      'delete': function (key) { __native.storageDelete(String(key)); },
+      getAllKeys: function () { return JSON.parse(__native.storageKeys()); },
       clearAll: function () { storage.getAllKeys().forEach(function (k) { storage['delete'](k); }); },
     };
     // WebView storage capture is not implemented, so these are always empty.
@@ -422,7 +430,7 @@
     return { storage: storage, localStorage: empty, sessionStorage: empty };
   }
 
-  function requireFor(pluginId) {
+  function requireFor() {
     return function (name) {
       switch (name) {
         case '@libs/fetch': return { fetchApi: fetchApi, fetchText: fetchText, fetchProto: fetchProto };
@@ -430,7 +438,7 @@
         case '@libs/filterInputs': return filterInputs;
         case '@libs/defaultCover': return { defaultCover: defaultCover };
         case '@libs/isAbsoluteUrl': return { isUrlAbsolute: isUrlAbsolute };
-        case '@libs/storage': return makeStorage(pluginId);
+        case '@libs/storage': return makeStorage();
         case '@/types/constants': return { NovelStatus: NovelStatus, defaultCover: defaultCover };
         case 'cheerio': return g.__libs.cheerio;
         case 'htmlparser2': return g.__libs.htmlparser2;
@@ -448,15 +456,18 @@
     var module = { exports: {} };
     current.id = pluginId;
     current.plugin = null;
-    new Function('exports', 'module', 'require', code)(module.exports, module, requireFor(pluginId));
+    new Function('exports', 'module', 'require', code)(module.exports, module, requireFor());
     var plugin = module.exports['default'] || module.exports;
     if (!plugin || typeof plugin.parseNovel !== 'function') throw new Error('not an lnreader plugin: ' + pluginId);
     current.plugin = plugin;
     return true;
   };
 
-  /** Calls plugin[method](...args) and returns JSON {ok, value} or {ok: false, error}. */
-  g.__call = function (method, argsJson) {
+  /**
+   * Calls plugin[method](...args) and returns JSON {ok, value} or {ok: false, error}. Gives up
+   * waiting at [deadline] (epoch millis); the native side fails fetches past it too.
+   */
+  g.__call = function (method, argsJson, deadline) {
     var plugin = current.plugin;
     var outcome = null;
     try {
@@ -468,13 +479,15 @@
       Promise.resolve(plugin[method].apply(plugin, args)).then(
         function (v) { outcome = { ok: true, value: v === undefined ? null : v }; },
         function (e) { outcome = { ok: false, error: (e && e.stack ? e + '\n' + e.stack : String(e)) }; });
-      drain(function () { return outcome !== null; });
+      drain(function () { return outcome !== null; }, deadline);
     } catch (e) {
       jobs.length = 0;
       outcome = { ok: false, error: (e && e.stack ? e + '\n' + e.stack : String(e)) };
     }
     timers = [];
-    if (outcome === null) outcome = { ok: false, error: method + ' never settled' };
+    if (outcome === null) {
+      outcome = { ok: false, error: method + (Date.now() >= deadline ? ' timed out' : ' never settled') };
+    }
     return JSON.stringify(outcome);
   };
 

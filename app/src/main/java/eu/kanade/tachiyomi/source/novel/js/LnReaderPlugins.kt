@@ -4,12 +4,22 @@ import android.app.Application
 import eu.kanade.tachiyomi.network.GET
 import eu.kanade.tachiyomi.network.NetworkHelper
 import eu.kanade.tachiyomi.network.awaitSuccess
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import logcat.LogPriority
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import tachiyomi.core.common.util.lang.withIOContext
-import uy.kohesive.injekt.injectLazy
+import tachiyomi.core.common.util.system.logcat
+import uy.kohesive.injekt.Injekt
+import uy.kohesive.injekt.api.get
 import java.io.File
+import java.io.IOException
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 
 /** An entry of the lnreader plugin index. */
 @Serializable
@@ -26,55 +36,108 @@ data class LnReaderPlugin(
 /**
  * Installs lnreader plugins from the official index into `filesDir/lnreader-plugins`, one
  * `<id>.js` per plugin plus `installed.json` with their index entries.
+ *
+ * Like Cloudstream's RepositoryManager.downloadPluginToFile, files are written to a temporary file
+ * and moved into place, so a failed download or a crash never leaves a broken plugin behind. Only
+ * code from the lnreader-plugins repository is accepted: the index lists no checksums to verify.
  */
-class LnReaderPlugins {
+class LnReaderPlugins(
+    private val dir: File = File(Injekt.get<Application>().filesDir, "lnreader-plugins"),
+    private val download: suspend (url: String) -> String = ::httpGet,
+) {
 
-    private val app: Application by injectLazy()
-    private val network: NetworkHelper by injectLazy()
+    private val mutex = Mutex()
 
-    private val dir by lazy { File(app.filesDir, "lnreader-plugins").apply { mkdirs() } }
     private val installedFile get() = File(dir, "installed.json")
 
-    fun installed(): List<LnReaderPlugin> =
-        runCatching { json.decodeFromString<List<LnReaderPlugin>>(installedFile.readText()) }
-            .getOrDefault(emptyList())
+    /**
+     * The installed plugins. An unreadable `installed.json` is moved to `installed.json.bak`
+     * rather than overwritten by the next install: the plugins it listed can be installed again,
+     * and their novels stay in the library since source ids come from the plugin ids.
+     */
+    fun installed(): List<LnReaderPlugin> {
+        if (!installedFile.exists()) return emptyList()
+        return try {
+            json.decodeFromString<List<LnReaderPlugin>>(installedFile.readText())
+        } catch (e: IllegalArgumentException) {
+            // SerializationException included
+            setAsideUnreadable(e)
+        } catch (e: IOException) {
+            setAsideUnreadable(e)
+        }
+    }
 
     fun source(plugin: LnReaderPlugin) = JsNovelSource(plugin, codeFile(plugin.id))
 
     suspend fun available(): List<LnReaderPlugin> = withIOContext {
-        val body = network.client.newCall(GET(INDEX_URL)).awaitSuccess().body.string()
-        json.decodeFromString<List<LnReaderPlugin>>(body).map { it.copy(lang = it.lang.cleanLang()) }
+        json.decodeFromString<List<LnReaderPlugin>>(download(INDEX_URL)).map { it.copy(lang = it.lang.cleanLang()) }
     }
 
-    suspend fun install(plugin: LnReaderPlugin): JsNovelSource = withIOContext {
-        val code = network.client.newCall(GET(plugin.url)).awaitSuccess().body.string()
-        codeFile(plugin.id).writeText(code)
-        save(installed().filterNot { it.id == plugin.id } + plugin.copy(lang = plugin.lang.cleanLang()))
-        source(plugin)
+    /** Downloads [plugin] and records it as installed, replacing an older version. */
+    suspend fun install(plugin: LnReaderPlugin) = withIOContext {
+        require(isTrustedPluginUrl(plugin.url)) { "${plugin.name}: not an lnreader-plugins url: ${plugin.url}" }
+        val code = download(plugin.url)
+        mutex.withLock {
+            writeAtomically(codeFile(plugin.id), code)
+            save(installed().filterNot { it.id == plugin.id } + plugin.copy(lang = plugin.lang.cleanLang()))
+        }
     }
 
-    fun uninstall(pluginId: String) {
-        codeFile(pluginId).delete()
-        save(installed().filterNot { it.id == pluginId })
+    suspend fun uninstall(pluginId: String) = withIOContext {
+        mutex.withLock {
+            save(installed().filterNot { it.id == pluginId })
+            codeFile(pluginId).delete()
+        }
     }
 
-    private fun save(plugins: List<LnReaderPlugin>) {
-        val tmp = File(dir, "installed.json.tmp")
-        tmp.writeText(json.encodeToString(plugins))
-        tmp.renameTo(installedFile)
+    private fun setAsideUnreadable(e: Exception): List<LnReaderPlugin> {
+        logcat(LogPriority.ERROR, e) { "installed.json is unreadable, moved to installed.json.bak" }
+        move(installedFile, File(dir, "installed.json.bak"))
+        return emptyList()
+    }
+
+    private fun save(plugins: List<LnReaderPlugin>) = writeAtomically(installedFile, json.encodeToString(plugins))
+
+    private fun writeAtomically(file: File, text: String) {
+        dir.mkdirs()
+        val tmp = File(dir, "${file.name}.tmp")
+        tmp.writeText(text)
+        move(tmp, file)
+    }
+
+    private fun move(from: File, to: File) {
+        try {
+            Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(from.toPath(), to.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
     }
 
     private fun codeFile(pluginId: String) = File(dir, pluginId.replace(UNSAFE_FILE_CHARS, "_") + ".js")
 
-    private companion object {
-        const val INDEX_URL =
+    companion object {
+        private const val INDEX_URL =
             "https://raw.githubusercontent.com/LNReader/lnreader-plugins/plugins/v3.0.0/.dist/plugins.min.json"
 
-        val UNSAFE_FILE_CHARS = Regex("[^A-Za-z0-9._-]")
+        private val UNSAFE_FILE_CHARS = Regex("[^A-Za-z0-9._-]")
 
-        val json = Json { ignoreUnknownKeys = true }
+        private val json = Json { ignoreUnknownKeys = true }
 
         /** Index languages are display names, some prefixed with a left-to-right mark. */
-        fun String.cleanLang() = trim('‎', ' ')
+        private fun String.cleanLang() = trim('‎', ' ')
+
+        private suspend fun httpGet(url: String): String =
+            Injekt.get<NetworkHelper>().client.newCall(GET(url)).awaitSuccess().body.string()
+
+        /** The index points at raw files of the lnreader-plugins repository; GitHub owner names ignore case. */
+        internal fun isTrustedPluginUrl(url: String): Boolean {
+            val parsed = url.toHttpUrlOrNull() ?: return false
+            val segments = parsed.pathSegments
+            return parsed.isHttps &&
+                parsed.host == "raw.githubusercontent.com" &&
+                segments.size > 2 &&
+                segments[0].equals("lnreader", ignoreCase = true) &&
+                segments[1].equals("lnreader-plugins", ignoreCase = true)
+        }
     }
 }
