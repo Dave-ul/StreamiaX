@@ -23,4 +23,13 @@ class RepeatedPageGuardTest {
         assertFalse(guard.isRepeat("search:x", 3, emptyList()))
         assertFalse(guard.isRepeat("search:x", 4, emptyList()))
     }
+
+    @Test
+    fun `a page loaded again is not a repeat`() {
+        assertFalse(guard.isRepeat("popular", 1, listOf("/a")))
+        assertFalse(guard.isRepeat("popular", 2, listOf("/b")))
+        // A retry or a refresh of page 2
+        assertFalse(guard.isRepeat("popular", 2, listOf("/b")))
+        assertTrue(guard.isRepeat("popular", 3, listOf("/b")))
+    }
 }

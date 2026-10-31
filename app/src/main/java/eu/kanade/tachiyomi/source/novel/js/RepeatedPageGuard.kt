@@ -7,15 +7,18 @@ import java.util.concurrent.atomic.AtomicReference
  * page, and since lnreader has no hasNextPage, a catalog would load them forever.
  *
  * Only the last page loaded is kept. Another listing loaded in between can only hide a repeat,
- * never report a false one.
+ * and a page loaded again (a retry, a refresh) is not one: only page n holding exactly what page
+ * n - 1 of the same listing held counts.
  */
 class RepeatedPageGuard {
 
-    private val last = AtomicReference<Pair<String, List<String>>?>(null)
+    private data class Loaded(val listing: String, val page: Int, val urls: List<String>)
 
-    /** True when page [page] of [listing] holds exactly the urls of the page loaded right before it. */
+    private val last = AtomicReference<Loaded?>(null)
+
+    /** True when page [page] of [listing] holds exactly the urls of its page [page] - 1, loaded right before. */
     fun isRepeat(listing: String, page: Int, urls: List<String>): Boolean {
-        val previous = last.getAndSet(listing to urls)
-        return page > 1 && urls.isNotEmpty() && previous == (listing to urls)
+        val previous = last.getAndSet(Loaded(listing, page, urls))
+        return page > 1 && urls.isNotEmpty() && previous == Loaded(listing, page - 1, urls)
     }
 }

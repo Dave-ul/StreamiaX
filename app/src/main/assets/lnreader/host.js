@@ -394,7 +394,7 @@
   /** The plugin being loaded or called; storage reads its pluginSettings defaults lazily. */
   var current = { id: '', plugin: null };
 
-  /** The native side keeps each plugin's keys apart, so keys here are the plugin's own. */
+  /** The native side prefixes keys with the plugin id (JsNovelRuntime), so keys here are the plugin's own. */
   function makeStorage() {
     var storage = {
       set: function (key, value, expires) {
@@ -489,11 +489,5 @@
       outcome = { ok: false, error: method + (Date.now() >= deadline ? ' timed out' : ' never settled') };
     }
     return JSON.stringify(outcome);
-  };
-
-  /** Plugin metadata as JSON, read once after __load. */
-  g.__info = function () {
-    var p = current.plugin;
-    return JSON.stringify({ id: p.id, name: p.name, site: p.site, version: p.version, icon: p.icon });
   };
 })(globalThis);

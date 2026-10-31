@@ -51,18 +51,19 @@ class LnReaderPlugins(
     private val installedFile get() = File(dir, "installed.json")
 
     /**
-     * The installed plugins. An unreadable `installed.json` is moved to `installed.json.bak`
-     * rather than overwritten by the next install: the plugins it listed can be installed again,
-     * and their novels stay in the library since source ids come from the plugin ids.
+     * The installed plugins. An `installed.json` that cannot be parsed is moved to
+     * `installed.json.bak` (or a dated `.bak` when that exists) rather than overwritten by the next
+     * install: the plugins it listed can be installed again, and their novels stay in the library
+     * since source ids come from the plugin ids. A read error is thrown: the file may be fine
+     * next time, so it is left where it is.
      */
     fun installed(): List<LnReaderPlugin> {
         if (!installedFile.exists()) return emptyList()
+        val text = installedFile.readText()
         return try {
-            json.decodeFromString<List<LnReaderPlugin>>(installedFile.readText())
+            json.decodeFromString<List<LnReaderPlugin>>(text)
         } catch (e: IllegalArgumentException) {
             // SerializationException included
-            setAsideUnreadable(e)
-        } catch (e: IOException) {
             setAsideUnreadable(e)
         }
     }
@@ -78,8 +79,10 @@ class LnReaderPlugins(
         require(isTrustedPluginUrl(plugin.url)) { "${plugin.name}: not an lnreader-plugins url: ${plugin.url}" }
         val code = download(plugin.url)
         mutex.withLock {
+            // Read first: a failed read must not leave new code under the old entry
+            val others = installed().filterNot { it.id == plugin.id }
             writeAtomically(codeFile(plugin.id), code)
-            save(installed().filterNot { it.id == plugin.id } + plugin.copy(lang = plugin.lang.cleanLang()))
+            save(others + plugin.copy(lang = plugin.lang.cleanLang()))
         }
     }
 
@@ -91,8 +94,10 @@ class LnReaderPlugins(
     }
 
     private fun setAsideUnreadable(e: Exception): List<LnReaderPlugin> {
-        logcat(LogPriority.ERROR, e) { "installed.json is unreadable, moved to installed.json.bak" }
-        move(installedFile, File(dir, "installed.json.bak"))
+        val bak = File(dir, "installed.json.bak").takeUnless { it.exists() }
+            ?: File(dir, "installed.json.${System.currentTimeMillis()}.bak")
+        logcat(LogPriority.ERROR, e) { "installed.json is unreadable, moved to ${bak.name}" }
+        move(installedFile, bak)
         return emptyList()
     }
 
@@ -101,8 +106,13 @@ class LnReaderPlugins(
     private fun writeAtomically(file: File, text: String) {
         dir.mkdirs()
         val tmp = File(dir, "${file.name}.tmp")
-        tmp.writeText(text)
-        move(tmp, file)
+        try {
+            tmp.writeText(text)
+            move(tmp, file)
+        } catch (e: IOException) {
+            tmp.delete()
+            throw e
+        }
     }
 
     private fun move(from: File, to: File) {

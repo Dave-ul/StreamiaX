@@ -66,6 +66,29 @@ class LnReaderPluginsTest {
     }
 
     @Test
+    fun `a second unreadable installed json does not overwrite the first set aside`() = runTest {
+        File(dir, "installed.json").writeText("first broken")
+        plugins.installed()
+        File(dir, "installed.json").writeText("second broken")
+        plugins.installed()
+
+        assertEquals("first broken", File(dir, "installed.json.bak").readText())
+        val dated = dir.listFiles()!!.single { it.name.matches(Regex("installed\\.json\\.\\d+\\.bak")) }
+        assertEquals("second broken", dated.readText())
+    }
+
+    @Test
+    fun `an installed json that cannot be read is left in place`() = runTest {
+        // A directory exists but cannot be read as a file
+        File(dir, "installed.json").mkdirs()
+
+        assertThrows<IOException> { plugins.installed() }
+        assertThrows<IOException> { plugins.install(plugin("a")) }
+        assertTrue(File(dir, "installed.json").isDirectory)
+        assertEquals(listOf("installed.json"), dir.list()!!.sorted())
+    }
+
+    @Test
     fun `uninstall removes the entry and the code`() = runTest {
         plugins.install(plugin("a"))
         plugins.install(plugin("b"))

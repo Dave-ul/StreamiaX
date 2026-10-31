@@ -4,7 +4,6 @@ import eu.kanade.tachiyomi.novelsource.model.NovelsPage
 import eu.kanade.tachiyomi.novelsource.model.SNovel
 import eu.kanade.tachiyomi.novelsource.model.SNovelChapter
 import eu.kanade.tachiyomi.novelsource.online.NovelHttpSource
-import kotlinx.coroutines.CancellationException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -122,32 +121,18 @@ class JsNovelSource(
         val totalPages = novel.totalPages
         if (novel.chapters.isNotEmpty() && (totalPages == null || totalPages <= 1)) return novel
 
-        val chapters = novel.chapters.toMutableList()
-        var page = if (chapters.isEmpty()) 1 else 2
-        val maxPages = totalPages ?: MAX_GUESSED_PAGES
-        while (page <= maxPages) {
-            val got = try {
-                JSON.decodeFromJsonElement<SourcePage>(
-                    js { it.call("parsePage", JsonPrimitive(novel.path), JsonPrimitive(page.toString())) },
-                ).chapters
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: JsTimeoutException) {
-                // A slow site, not the end of the list
-                throw e
-            } catch (e: Exception) {
-                // With a known page count a failed page fails the whole list: a list cut short would
-                // make the sync delete the chapters after it, with their read state and history.
-                // When guessing, many plugins throw past the last page, so that ends the list.
-                if (totalPages != null || page == 1) throw e
+        val chapters = collectChapterPages(
+            first = novel.chapters,
+            totalPages = totalPages,
+            onGuessEnd = { page, e ->
                 logcat(LogPriority.WARN, e) { "${plugin.name}: stopped guessing pages at $page" }
-                break
+            },
+        ) { page ->
+            js { runtime ->
+                val args = arrayOf(JsonPrimitive(novel.path), JsonPrimitive(page.toString()))
+                val got = JSON.decodeFromJsonElement<SourcePage>(runtime.call("parsePage", *args)).chapters
+                LoadedPage(got, runtime.lastNetworkError)
             }
-            if (got.isEmpty()) break
-            chapters += got
-            // Without a page count, a short page is taken to be the last one
-            if (totalPages == null && got.size < MIN_FULL_PAGE) break
-            page++
         }
         return novel.copy(chapters = chapters)
     }
@@ -181,9 +166,6 @@ class JsNovelSource(
     data class SourcePage(val chapters: List<ChapterItem> = emptyList())
 
     private companion object {
-        const val MAX_GUESSED_PAGES = 50
-        const val MIN_FULL_PAGE = 5
-
         val JSON = Json {
             ignoreUnknownKeys = true
             isLenient = true
