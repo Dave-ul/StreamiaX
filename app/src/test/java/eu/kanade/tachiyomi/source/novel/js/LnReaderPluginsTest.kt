@@ -91,7 +91,9 @@ class LnReaderPluginsTest {
         assertFalse(LnReaderPlugins.isTrustedPluginUrl(trusted.replace("lnreader-plugins", "other")))
         assertFalse(LnReaderPlugins.isTrustedPluginUrl(trusted.replace("/lnreader/", "/someone/")))
         assertFalse(
-            LnReaderPlugins.isTrustedPluginUrl("https://raw.githubusercontent.com.evil.com/lnreader/lnreader-plugins/a"),
+            LnReaderPlugins.isTrustedPluginUrl(
+                "https://raw.githubusercontent.com.evil.com/lnreader/lnreader-plugins/a",
+            ),
         )
         assertFalse(LnReaderPlugins.isTrustedPluginUrl("not a url"))
     }
